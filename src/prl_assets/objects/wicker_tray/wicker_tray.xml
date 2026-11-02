@@ -10,56 +10,12 @@
     <body name="wicker_tray" pos="0 0 0">
       <freejoint name="wicker_tray_joint"/>
 
-      <!-- Collision geometry - hollow tray (floor + 4 walls) -->
-      <!-- Floor -->
-      <geom condim="4" name="wicker_tray_floor" group="3"
-            type="box"
-            pos="0 0 0.005"
-            size="0.23 0.33 0.005"
-            mass="0.2"
-            friction="0.8 0.005 0.0001"
-            contype="1"
-            conaffinity="1"/>
-
-      <!-- Left wall (negative X) -->
-      <geom condim="4" name="wicker_tray_wall_left" group="3"
-            type="box"
-            pos="-0.225 0 0.0425"
-            size="0.005 0.33 0.0325"
-            mass="0.075"
-            friction="0.8 0.005 0.0001"
-            contype="1"
-            conaffinity="1"/>
-
-      <!-- Right wall (positive X) -->
-      <geom condim="4" name="wicker_tray_wall_right" group="3"
-            type="box"
-            pos="0.225 0 0.0425"
-            size="0.005 0.33 0.0325"
-            mass="0.075"
-            friction="0.8 0.005 0.0001"
-            contype="1"
-            conaffinity="1"/>
-
-      <!-- Front wall (negative Y) -->
-      <geom condim="4" name="wicker_tray_wall_front" group="3"
-            type="box"
-            pos="0 -0.325 0.0425"
-            size="0.22 0.005 0.0325"
-            mass="0.075"
-            friction="0.8 0.005 0.0001"
-            contype="1"
-            conaffinity="1"/>
-
-      <!-- Back wall (positive Y) -->
-      <geom condim="4" name="wicker_tray_wall_back" group="3"
-            type="box"
-            pos="0 0.325 0.0425"
-            size="0.22 0.005 0.0325"
-            mass="0.075"
-            friction="0.8 0.005 0.0001"
-            contype="1"
-            conaffinity="1"/>
+      <!-- Collision geometry: floor and tapered walls following the visual's inner faces (authoring.tapered_open_box) -->
+      <geom name="wicker_tray_collision_0" type="box" size="0.21673 0.31604 0.005" pos="0 0 0.005" mass="0.324946" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="wicker_tray_collision_1" type="box" size="0.005 0.33149 0.03333" pos="0.219 0 0.04139" quat="0.99374 0 0.11174 0" mass="0.0524192" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="wicker_tray_collision_2" type="box" size="0.005 0.33149 0.03333" pos="-0.219 0 0.04139" quat="0.99374 0 -0.11174 0" mass="0.0524192" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="wicker_tray_collision_3" type="box" size="0.22153 0.005 0.0334" pos="0 0.31863 0.04134" quat="0.9932 -0.11638 0 0" mass="0.0351077" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="wicker_tray_collision_4" type="box" size="0.22153 0.005 0.0334" pos="0 -0.31863 0.04134" quat="0.9932 0.11638 0 0" mass="0.0351077" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
 
       <!-- Visual mesh -->
       <geom name="wicker_tray_visual" group="2" mass="0"

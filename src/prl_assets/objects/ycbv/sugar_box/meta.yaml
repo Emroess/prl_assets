@@ -10,6 +10,9 @@ amazon_link: https://www.amazon.com/dp/B00O60NVHY
 geometric_properties:
   type: box
   size: [0.176, 0.094, 0.048]
+  collision_tolerance_mm:
+    collision_excess: 10.0
+    reason: "the scan rounds the box's edges; the box keeps flat faces for resting and face grasps"
 
 mujoco:
   xml_path: sugar_box.xml

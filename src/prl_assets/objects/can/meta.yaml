@@ -13,6 +13,9 @@ geometric_properties:
   type: cylinder
   radius: 0.033  # meters
   height: 0.123  # meters
+  collision_tolerance_mm:
+    collision_excess: 5.5
+    reason: "the rolled rim narrows the can's top 10 mm; the cylinder keeps the body's radius"
 
 # MuJoCo simulation
 mujoco:

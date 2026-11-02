@@ -10,6 +10,7 @@ material: wicker
 # Geometric properties for grasp planning
 geometric_properties:
   type: tray
+  open: true  # things can be put inside; see docs/schema.md
   outer_size: [0.46, 0.66, 0.075]
   wall_thickness: 0.01
   floor_thickness: 0.01

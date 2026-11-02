@@ -12,6 +12,9 @@ geometric_properties:
   type: cylinder
   radius: 0.037  # meters
   height: 0.215  # meters
+  collision_tolerance_mm:
+    collision_excess: 4.5
+    reason: "the cap's top edge is rounded; the top cylinder keeps the cap's radius to its top"
 
 # MuJoCo simulation
 mujoco:

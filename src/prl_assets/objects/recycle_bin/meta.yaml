@@ -11,6 +11,7 @@ material: plastic
 # Geometric properties
 geometric_properties:
   type: open_box
+  open: true  # things can be put inside; see docs/schema.md
   outer_size: [0.278, 0.278, 0.797]
   inner_size: [0.238, 0.238, 0.757]
   wall_thickness: 0.02

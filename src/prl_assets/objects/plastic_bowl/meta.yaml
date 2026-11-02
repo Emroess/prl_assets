@@ -10,6 +10,7 @@ material: plastic
 # Geometric properties for grasp planning
 geometric_properties:
   type: bowl
+  open: true  # things can be put inside; see docs/schema.md
   outer_radius: 0.086  # meters
   inner_radius: 0.045  # meters (floor)
   height: 0.076  # meters

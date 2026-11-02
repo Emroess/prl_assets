@@ -8,17 +8,11 @@
   </asset>
 
   <worldbody>
-    <body name="gelatin_box" pos="0 0 0.014">
+    <body name="gelatin_box" pos="0 0 0.01503">
       <freejoint name="gelatin_box_joint"/>
 
-      <!-- Collision geometry - box (small Jell-O box) -->
-      <geom condim="4" name="gelatin_box_collision" group="3"
-            type="box"
-            size="0.036 0.044 0.014"
-            mass="0.1"
-            friction="0.7 0.005 0.0001"
-            contype="1"
-            conaffinity="1"/>
+      <!-- Collision geometry: box bounding the scan (authoring.fit_box) -->
+      <geom name="gelatin_box_collision" type="box" size="0.0365 0.04483 0.01503" pos="0.0003 -0.0002 0" mass="0.1" friction="0.7 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
 
       <!-- Visual mesh -->
       <geom name="gelatin_box_visual" group="2" mass="0"

@@ -8,17 +8,11 @@
   </asset>
 
   <worldbody>
-    <body name="cracker_box" pos="0 0 0.104">
+    <body name="cracker_box" pos="0 0 0.1067">
       <freejoint name="cracker_box_joint"/>
 
-      <!-- Collision geometry - box -->
-      <geom condim="4" name="cracker_box_collision" group="3"
-            type="box"
-            size="0.031 0.081 0.104"
-            mass="0.4"
-            friction="0.7 0.005 0.0001"
-            contype="1"
-            conaffinity="1"/>
+      <!-- Collision geometry: box bounding the scan (authoring.fit_box) -->
+      <geom name="cracker_box_collision" type="box" size="0.03589 0.082 0.1067" pos="0 0 0" mass="0.4" friction="0.7 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
 
       <!-- Visual mesh -->
       <geom name="cracker_box_visual" group="2" mass="0"
