@@ -25,3 +25,6 @@ __version__ = "0.1.0"
 
 # Objects directory - pass this to AssetManager
 OBJECTS_DIR = Path(__file__).parent / "objects"
+
+# The YCB-Video (BOP ycbv) collection alone; OBJECTS_DIR includes it
+YCBV_OBJECTS_DIR = OBJECTS_DIR / "ycbv"

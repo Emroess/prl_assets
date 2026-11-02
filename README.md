@@ -54,14 +54,51 @@ print(meta["mass"])  # 0.05 kg
 containers = assets.by_category("container")
 ```
 
+## YCB-Video Collection
+
+`objects/ycbv/` holds objects from the YCB-Video (BOP `ycbv`) set, so that a pose
+estimator trained on YCB-V and the simulator refer to the same object, geometry and
+frame. Load the collection alone, or the whole catalog, which includes it:
+
+```python
+from asset_manager import AssetManager
+from prl_assets import OBJECTS_DIR, YCBV_OBJECTS_DIR
+
+ycbv = AssetManager(YCBV_OBJECTS_DIR)  # only the YCB-V objects
+catalog = AssetManager(OBJECTS_DIR)  # everything, YCB-V included
+
+catalog.resolve_alias("003_cracker_box")  # 'cracker_box'
+catalog.get("cracker_box")["dataset"]["ycbv"]["bop_id"]  # 2
+```
+
+Each YCB-V object records its BOP id, its original YCB name (also a perception alias),
+the rigid transform `T_asset_bop` from the BOP model frame (converted to metres) to the
+asset frame, the BOP symmetries, and its provenance. To place a detected object:
+`T_camera_asset = T_camera_bop @ inverse(T_asset_bop)`, with the detector's translation
+in metres. [docs/schema.md](docs/schema.md) defines these fields and frames;
+[docs/ycbv_audit.md](docs/ycbv_audit.md) records how the existing objects were matched
+to the BOP models. The scans are CC BY 4.0, not MIT; see
+[objects/ycbv/NOTICE.md](src/prl_assets/objects/ycbv/NOTICE.md).
+
+The collection currently holds `cracker_box`, `sugar_box`, `gelatin_box` and `spam_can`;
+the remaining YCB-V objects are tracked in issue #28.
+
+### Migrating from flat paths
+
+`cracker_box`, `sugar_box`, `gelatin_box` and `spam_can` moved from `objects/<name>/`
+to `objects/ycbv/<name>/`. Their names, aliases, models and physical properties did not
+change, so code that looks them up through `AssetManager` is unaffected. Code that
+builds paths such as `OBJECTS_DIR / "cracker_box"` must use
+`AssetManager(OBJECTS_DIR).get_path("cracker_box", "mujoco")` instead.
+
 ## Available Objects
 
 | Object | Description | Collision |
 |--------|-------------|-----------|
 | `can` | Aluminum soda/beer can | cylinder |
-| `cracker_box` | Cheez-It crackers box | box |
+| `cracker_box` | Cheez-It crackers box (YCB-V 2) | box |
 | `fuze_bottle` | Beverage bottle with texture | cylinder |
-| `gelatin_box` | Jell-O gelatin box | box |
+| `gelatin_box` | Jell-O gelatin box (YCB-V 8) | box |
 | `herring_tin` | MW Polar herring tin | box + 2 cylinders |
 | `lunchbox` | Wildkin insulated lunch box | box |
 | `notebook` | Amazon Basics hardcover notebook | box |
@@ -70,22 +107,25 @@ containers = assets.by_category("container")
 | `plastic_plate` | Dinner plate (stackable) | mesh |
 | `pocky_box` | Pocky biscuit sticks box | box |
 | `pop_tarts_case` | Pop-Tarts food box | box |
-| `spam_can` | SPAM canned meat | box |
+| `spam_can` | SPAM canned meat (YCB-V 9, potted meat can) | box |
 | `recycle_bin` | Open-top recycling bin (hollow) | 5 boxes |
-| `sugar_box` | Domino sugar box | box |
+| `sugar_box` | Domino sugar box (YCB-V 3) | box |
 | `wicker_tray` | Serving tray (hollow) | 5 boxes |
 | `yellow_tote` | Storage tote (hollow) | 5 boxes |
 
 ## Object Structure
 
-Each object follows a standardized directory structure:
+Each object follows a standardized directory structure. Objects may be grouped in a
+collection directory, such as `ycbv/`, which has no `meta.yaml` of its own:
 
 ```
 objects/
-└── object_name/
-    ├── meta.yaml          # Object metadata
-    ├── object_name.xml    # MuJoCo model
-    └── *_visual.obj       # Visual mesh (optional)
+├── object_name/
+│   ├── meta.yaml          # Object metadata
+│   ├── object_name.xml    # MuJoCo model
+│   └── *_visual.obj       # Visual mesh (optional)
+└── ycbv/
+    └── cracker_box/       # same structure, plus YCB-V metadata
 ```
 
 ### Metadata Format
@@ -178,6 +218,11 @@ All objects must follow this coordinate frame convention:
 
 **Collision and visual alignment**: Collision geoms must be aligned with visual meshes. Both should be centered at the body origin with matching dimensions.
 
+**YCB-V objects**: the body `pos` is only the placement that rests the object on z=0
+when its file is loaded alone; it does not change the object's frame. A YCB-V object's
+geometry is expressed about the BOP model origin, near its geometric centre, and the
+relation to the BOP frame is `T_asset_bop`. See [docs/schema.md](docs/schema.md#frames-framest_asset_bop).
+
 **Verification**: Run visualization scripts to verify object geometry:
 
 ```bash
@@ -203,7 +248,10 @@ uv run python scripts/validate_objects.py
 | `viz_stacking_demo.py` | Physics demo: stacked dishes on tray, objects in tote |
 | `validate_objects.py` | Check objects against coordinate frame and collision standards |
 | `recenter_mesh.py` | Utility to re-center mesh origin to centroid |
+| `audit_ycbv.py` | Check YCB-V objects' declared frames against the pinned BOP models; writes `docs/ycbv_audit.json` |
 
 ## License
 
-MIT License - see LICENSE file for details.
+The code is MIT licensed; see LICENSE. Object data keeps its source's terms: the YCB-V
+scans are CC BY 4.0, as stated in
+[objects/ycbv/NOTICE.md](src/prl_assets/objects/ycbv/NOTICE.md).

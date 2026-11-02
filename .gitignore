@@ -42,3 +42,6 @@ htmlcov/
 # UV
 .uv/
 uv.lock
+
+# Test and audit outputs
+artifacts/
