@@ -97,21 +97,21 @@ builds paths such as `OBJECTS_DIR / "cracker_box"` must use
 |--------|-------------|-----------|
 | `can` | Aluminum soda/beer can | cylinder |
 | `cracker_box` | Cheez-It crackers box (YCB-V 2) | box |
-| `fuze_bottle` | Beverage bottle with texture | cylinder |
+| `fuze_bottle` | Beverage bottle with texture | 11 stacked cylinders (body, shoulder, neck) |
 | `gelatin_box` | Jell-O gelatin box (YCB-V 8) | box |
 | `herring_tin` | MW Polar herring tin | box + 2 cylinders |
-| `lunchbox` | Wildkin insulated lunch box | box |
+| `lunchbox` | Wildkin insulated lunch box | convex hull of the scan |
 | `notebook` | Amazon Basics hardcover notebook | box |
-| `plastic_bowl` | Tableware bowl (nestable) | mesh |
-| `plastic_glass` | Drinking glass | cylinder |
-| `plastic_plate` | Dinner plate (stackable) | mesh |
+| `plastic_bowl` | Tableware bowl (nestable) | open shell, 145 boxes |
+| `plastic_glass` | Drinking glass (open) | open shell, 97 boxes |
+| `plastic_plate` | Dinner plate (stackable) | open shell, 113 boxes |
 | `pocky_box` | Pocky biscuit sticks box | box |
 | `pop_tarts_case` | Pop-Tarts food box | box |
 | `spam_can` | SPAM canned meat (YCB-V 9, potted meat can) | box |
 | `recycle_bin` | Open-top recycling bin (hollow) | 5 boxes |
 | `sugar_box` | Domino sugar box (YCB-V 3) | box |
-| `wicker_tray` | Serving tray (hollow) | 5 boxes |
-| `yellow_tote` | Storage tote (hollow) | 5 boxes |
+| `wicker_tray` | Serving tray (hollow) | floor + 4 tapered walls |
+| `yellow_tote` | Storage tote (hollow) | floor + 4 tapered walls + rim lip |
 
 ## Object Structure
 
@@ -168,19 +168,64 @@ policy:
 
 ## Adding New Objects
 
-1. Create a new directory under `src/prl_assets/objects/`
-2. Add a `meta.yaml` with required fields (see format below)
-3. Add MuJoCo XML model following the conventions below
-4. Add visual mesh (`.obj` file) if needed
-5. Verify with scripts:
-   ```bash
-   # Check coordinate frame and collision alignment
-   uv run python scripts/inspect_object.py your_object
+`prl_assets.authoring` measures a model as MuJoCo compiles it and builds collision
+geometry from the visual mesh. CI runs the same check on every object
+(`tests/test_collision_fit.py`), so an object that passes here passes there. Install it
+with the `authoring` extra (`uv sync --extra authoring`).
 
-   # Validate against standards
-   uv run python scripts/validate_objects.py your_object
-   ```
-6. Update the objects table in this README
+1. Create `src/prl_assets/objects/<name>/` with the visual mesh and any texture.
+2. Write a `meta.yaml` and a first model with a placeholder collision geom, so the
+   visual mesh can be measured as MuJoCo loads it.
+3. Build collision geometry from the visual mesh with the builder that matches the
+   object's shape:
+
+   | Shape | Builder |
+   | --- | --- |
+   | Box-like | `fit_box` |
+   | Solid of revolution (can, bottle) | `stacked_cylinders` |
+   | Open container of revolution (cup, bowl, plate) | `fit_revolved_shell`, and declare `geometric_properties.open: true` |
+   | Open box (tote, tray, bin) | `tapered_open_box` or `open_box`, and declare `open: true` |
+   | Convex without a cavity, faces that bulge (a soft bag) | `hull_of` |
+
+4. Run `uv run --extra authoring python scripts/validate_objects.py <name>` until it
+   passes, and look at the result with `scripts/inspect_object.py <name>`. Where a
+   primitive deliberately departs from the scan, such as a box with flat faces for a
+   scan with rounded edges, declare the tolerance and the reason (see
+   [docs/schema.md](docs/schema.md#collision-geometry)).
+5. Add the object to the table above.
+
+For a cup, steps 2 to 4 look like this:
+
+```python
+from pathlib import Path
+
+from prl_assets import authoring
+
+cup = Path("src/prl_assets/objects/paper_cup")
+placeholder = authoring.GeomSpec("box", [0.01, 0.01, 0.01], [0.0, 0.0, 0.0])
+authoring.write_model(cup, "paper_cup", "paper_cup_visual.obj", [placeholder], mass=0.01)
+authoring.write_meta(
+    cup,
+    "paper_cup",
+    description="Paper cup",
+    category=["container", "graspable"],
+    mass=0.01,
+    geometric_properties={"type": "cylinder", "open": True},
+)
+
+obj = authoring.load(cup)
+points = authoring.to_body(obj, authoring.visual_points(obj))
+floor = authoring.visual_floor(obj) - obj.data.xpos[obj.body][2]
+authoring.replace_collision_geoms(
+    cup / "paper_cup.xml",
+    "paper_cup",
+    authoring.fit_revolved_shell(points, floor),
+    mass=0.01,
+    body_pos=(0.0, 0.0, -points[:, 2].min()),  # rest the file's pose on z = 0
+    comment="Collision geometry: open cup from authoring.fit_revolved_shell",
+)
+print(authoring.check(cup))
+```
 
 ### MuJoCo Model Requirements
 
@@ -210,13 +255,13 @@ All objects must follow this coordinate frame convention:
 4. **Canonical resting pose**: The stable pose the object would naturally rest in (e.g., can upright, box on largest face)
 5. **Dimensions in resting frame**: The `dimensions` field in meta.yaml is [X, Y, Z] in the canonical resting pose, where **Z is always the height when resting**. For a flat object (e.g., herring tin) that rests on its largest face, Z is the thin dimension.
 
-**Implementation**: The body `pos` attribute should offset the origin by half the object's height (dimensions[2]/2):
+**Implementation**: The body `pos` places the object so that the bottom of its collision geometry is at z=0; for geometry centred on the body origin, that is half the object's height (dimensions[2]/2):
 ```xml
 <!-- For a cylinder of height 0.123m -->
 <body name="can" pos="0 0 0.0615">
 ```
 
-**Collision and visual alignment**: Collision geoms must be aligned with visual meshes. Both should be centered at the body origin with matching dimensions.
+**Collision and visual alignment**: Collision geometry must have the shape of the visual mesh, within the tolerances in [docs/schema.md](docs/schema.md#collision-geometry); `scripts/validate_objects.py` measures it.
 
 **YCB-V objects**: the body `pos` is only the placement that rests the object on z=0
 when its file is loaded alone; it does not change the object's frame. A YCB-V object's
@@ -235,8 +280,8 @@ uv run python scripts/viz_all_objects.py
 # Physics demo with stacking
 uv run python scripts/viz_stacking_demo.py
 
-# Validate all objects against standards
-uv run python scripts/validate_objects.py
+# Check every object the way CI does
+uv run --extra authoring python scripts/validate_objects.py
 ```
 
 ## Scripts
@@ -246,7 +291,7 @@ uv run python scripts/validate_objects.py
 | `inspect_object.py` | Visualize single object with collision overlay and coordinate axes |
 | `viz_all_objects.py` | Display all 17 objects in a grid with collision geometry |
 | `viz_stacking_demo.py` | Physics demo: stacked dishes on tray, objects in tote |
-| `validate_objects.py` | Check objects against coordinate frame and collision standards |
+| `validate_objects.py` | Check objects the way CI does: conventions, mass, collision geometry against the visual mesh, open interiors |
 | `recenter_mesh.py` | Utility to re-center mesh origin to centroid |
 | `audit_ycbv.py` | Check YCB-V objects' declared frames against the pinned BOP models by shape and texture; writes `artifacts/ycbv_audit.json`, and with `--record` `docs/ycbv_audit.json` |
 
