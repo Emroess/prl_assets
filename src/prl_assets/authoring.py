@@ -1,0 +1,710 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Siddhartha Srinivasa
+
+"""Measure, fit and build prl_assets objects as MuJoCo compiles them.
+
+Every measurement works on the compiled model, because that is what simulation
+collides with: a mesh geom collides as its convex hull, defaults and classes are
+applied, and geom offsets are resolved. The visual mesh (geom group 2) is the
+reference for the object's shape; the collision geoms (those with contype or
+conaffinity) must match it.
+
+Requires the ``authoring`` extra (``mujoco``, ``scipy``)::
+
+    from prl_assets import authoring
+
+    obj = authoring.load("plastic_bowl")
+    print(authoring.check(obj))
+
+Typical workflow for a new object: measure its visual mesh with ``visual_points``,
+build collision geoms with ``fit_box``, ``stacked_cylinders``, ``revolved_shell`` or
+``open_box``, write the model with ``write_model``, then run ``check`` (or
+``scripts/validate_objects.py <name>``) until it passes. CI runs the same check on
+every object.
+"""
+
+from __future__ import annotations
+
+import math
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import mujoco
+import numpy as np
+import trimesh
+import yaml
+from scipy.spatial import ConvexHull
+
+from prl_assets import OBJECTS_DIR
+
+VISUAL_GROUP = 2
+COLLISION_GROUP = 3
+
+# Defaults for check(); an object may widen one in
+# geometric_properties.collision_tolerance_mm with a stated reason.
+DEFAULT_TOLERANCE_MM = {
+    "visual_outside": 3.0,  # 99th percentile of the visual surface outside the collision geoms
+    "collision_excess": 3.0,  # 99th percentile of the collision surface outside the visual's hull
+    "sink": 1.0,  # how far the visual mesh reaches below the collision geometry's bottom
+    "resting": 1.0,  # |collision bottom| at the model file's pose, which must rest on z = 0
+    "floor_gap": 3.0,  # open objects: a dropped sphere's rest height above the visual inner floor
+}
+
+_SAMPLES = 20000
+_PROBE_RADIUS = 0.01
+
+
+# --------------------------------------------------------------------------- loading
+
+
+def object_dirs(root: Path = OBJECTS_DIR) -> dict[str, Path]:
+    """Every object directory under ``root``, at any depth, keyed by directory name."""
+    return {meta.parent.name: meta.parent for meta in sorted(Path(root).rglob("meta.yaml"))}
+
+
+@dataclass
+class Compiled:
+    """An object's compiled model, at the pose its model file gives it."""
+
+    name: str
+    dir: Path
+    meta: dict
+    spec: mujoco.MjSpec
+    model: mujoco.MjModel
+    data: mujoco.MjData
+
+    @property
+    def body(self) -> int:
+        """The object's top-level body."""
+        return next(b for b in range(1, self.model.nbody) if self.model.body_parentid[b] == 0)
+
+
+def load(obj: str | Path, root: Path = OBJECTS_DIR) -> Compiled:
+    """Compile an object by name (searched under ``root``) or by directory."""
+    obj_dir = Path(obj) if Path(obj).is_dir() else object_dirs(root)[str(obj)]
+    meta = yaml.safe_load((obj_dir / "meta.yaml").read_text()) or {}
+    spec = mujoco.MjSpec.from_file(str(obj_dir / meta["mujoco"]["xml_path"]))
+    return _compiled(meta.get("name", obj_dir.name), obj_dir, meta, spec)
+
+
+def from_spec(spec: mujoco.MjSpec, like: Compiled, meta: dict | None = None) -> Compiled:
+    """``like`` with an edited spec (and optionally edited metadata), to try a change
+    before writing it."""
+    return _compiled(like.name, like.dir, like.meta if meta is None else meta, spec)
+
+
+def _compiled(name, obj_dir, meta, spec) -> Compiled:
+    model = spec.compile()
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    return Compiled(name, obj_dir, meta, spec, model, data)
+
+
+# ----------------------------------------------------------------------- geometry
+
+
+def collision_geoms(obj: Compiled) -> list[int]:
+    m = obj.model
+    return [g for g in range(m.ngeom) if m.geom_contype[g] or m.geom_conaffinity[g]]
+
+
+def visual_geoms(obj: Compiled) -> list[int]:
+    m = obj.model
+    return [
+        g
+        for g in range(m.ngeom)
+        if m.geom_group[g] == VISUAL_GROUP
+        and m.geom_type[g] == mujoco.mjtGeom.mjGEOM_MESH
+        and not (m.geom_contype[g] or m.geom_conaffinity[g])
+    ]
+
+
+def geom_mesh(obj: Compiled, g: int) -> trimesh.Trimesh:
+    """Geom ``g`` as a triangle mesh in world coordinates (a mesh geom as its own triangles)."""
+    m, d = obj.model, obj.data
+    t, s = int(m.geom_type[g]), m.geom_size[g]
+    G = mujoco.mjtGeom
+    if t == G.mjGEOM_MESH:
+        i = m.geom_dataid[g]
+        verts = m.mesh_vert[m.mesh_vertadr[i] : m.mesh_vertadr[i] + m.mesh_vertnum[i]]
+        faces = m.mesh_face[m.mesh_faceadr[i] : m.mesh_faceadr[i] + m.mesh_facenum[i]]
+        mesh = trimesh.Trimesh(verts, faces, process=False)
+    elif t == G.mjGEOM_BOX:
+        mesh = trimesh.creation.box(2 * s)
+    elif t == G.mjGEOM_CYLINDER:
+        mesh = trimesh.creation.cylinder(s[0], 2 * s[1], sections=64)
+    elif t == G.mjGEOM_SPHERE:
+        mesh = trimesh.creation.icosphere(4, s[0])
+    elif t == G.mjGEOM_CAPSULE:
+        mesh = trimesh.creation.capsule(2 * s[1], s[0])
+    else:
+        raise ValueError(f"{obj.name}: geom {g} has unsupported type {mujoco.mjtGeom(t).name}")
+    mesh.apply_transform(_pose(d.geom_xpos[g], d.geom_xmat[g]))
+    return mesh
+
+
+def visual_points(obj: Compiled, n: int = _SAMPLES, seed: int = 0) -> np.ndarray:
+    """Surface samples of the visual mesh, world coordinates."""
+    meshes = [geom_mesh(obj, g) for g in visual_geoms(obj)]
+    if not meshes:
+        raise ValueError(f"{obj.name}: no visual mesh (group {VISUAL_GROUP})")
+    return trimesh.sample.sample_surface(trimesh.util.concatenate(meshes), n, seed=seed)[0]
+
+
+def to_body(obj: Compiled, points: np.ndarray) -> np.ndarray:
+    """World points expressed in the object's body frame."""
+    b = obj.body
+    return (points - obj.data.xpos[b]) @ obj.data.xmat[b].reshape(3, 3)
+
+
+def distance_outside(obj: Compiled, points: np.ndarray, geoms: list[int] | None = None) -> np.ndarray:
+    """Distance (m) of each world point outside the union of ``geoms`` (default: the
+    collision geoms); 0 inside. Mesh geoms count as their convex hull, as MuJoCo collides
+    them, and the distance outside a hull is its largest face-plane distance, a lower
+    bound that is exact wherever the nearest feature is a face."""
+    m, d = obj.model, obj.data
+    G = mujoco.mjtGeom
+    out = np.full(len(points), np.inf)
+    for g in collision_geoms(obj) if geoms is None else geoms:
+        t, s = int(m.geom_type[g]), m.geom_size[g]
+        if t == G.mjGEOM_MESH:
+            dist = _outside_hull(geom_mesh(obj, g).vertices, points)
+        else:
+            q = (points - d.geom_xpos[g]) @ d.geom_xmat[g].reshape(3, 3)
+            if t == G.mjGEOM_BOX:
+                dist = np.linalg.norm(np.maximum(np.abs(q) - s, 0), axis=1)
+            elif t == G.mjGEOM_CYLINDER:
+                radial = np.linalg.norm(q[:, :2], axis=1) - s[0]
+                dist = np.linalg.norm(np.maximum(np.stack([radial, np.abs(q[:, 2]) - s[1]], 1), 0), axis=1)
+            elif t == G.mjGEOM_SPHERE:
+                dist = np.maximum(np.linalg.norm(q, axis=1) - s[0], 0)
+            elif t == G.mjGEOM_CAPSULE:
+                axis = np.zeros_like(q)
+                axis[:, 2] = np.clip(q[:, 2], -s[1], s[1])
+                dist = np.maximum(np.linalg.norm(q - axis, axis=1) - s[0], 0)
+            else:
+                raise ValueError(f"{obj.name}: geom {g} has unsupported type {mujoco.mjtGeom(t).name}")
+        out = np.minimum(out, dist)
+    return out
+
+
+def _outside_hull(vertices: np.ndarray, points: np.ndarray) -> np.ndarray:
+    eq = ConvexHull(vertices).equations
+    return np.maximum((points @ eq[:, :3].T + eq[:, 3]).max(axis=1), 0)
+
+
+# ---------------------------------------------------------------------- measuring
+
+
+@dataclass
+class Fit:
+    """How an object's collision geometry agrees with its visual mesh, in millimetres."""
+
+    visual_outside_p99: float
+    visual_outside_max: float
+    collision_excess_p99: float
+    collision_excess_max: float
+    sink: float
+    resting: float
+    floor_gap: float | None
+    visual_extent: list[float]
+    collision_extent: list[float]
+
+
+def collision_fit(obj: Compiled, n: int = _SAMPLES) -> Fit:
+    """Measure ``obj``'s collision geoms against its visual mesh. See ``DEFAULT_TOLERANCE_MM``."""
+    visual = visual_points(obj, n)
+    collision = [geom_mesh(obj, g) for g in collision_geoms(obj)]
+    col_points = trimesh.sample.sample_surface(trimesh.util.concatenate(collision), n, seed=1)[0]
+    vis_vertices = np.vstack([geom_mesh(obj, g).vertices for g in visual_geoms(obj)])
+    col_vertices = np.vstack([c.vertices for c in collision])
+
+    outside = 1e3 * distance_outside(obj, visual)
+    excess = 1e3 * _outside_hull(vis_vertices, col_points)
+    bottom = col_vertices[:, 2].min()
+    return Fit(
+        visual_outside_p99=_mm(np.percentile(outside, 99)),
+        visual_outside_max=_mm(outside.max()),
+        collision_excess_p99=_mm(np.percentile(excess, 99)),
+        collision_excess_max=_mm(excess.max()),
+        sink=_mm(1e3 * (bottom - vis_vertices[:, 2].min())),
+        resting=_mm(1e3 * bottom),
+        floor_gap=floor_gap(obj) if is_open(obj) else None,
+        visual_extent=[_mm(1e3 * v) for v in np.ptp(vis_vertices, axis=0)],
+        collision_extent=[_mm(1e3 * v) for v in np.ptp(col_vertices, axis=0)],
+    )
+
+
+def is_open(obj: Compiled) -> bool:
+    """Whether the object declares an open interior that things can be put into."""
+    return bool(obj.meta.get("geometric_properties", {}).get("open"))
+
+
+def visual_floor(obj: Compiled, xy: tuple[float, float] | None = None) -> float:
+    """Height (m) of the first visual surface hit looking straight down at ``xy``
+    (default: above the body origin)."""
+    m, d = obj.model, obj.data
+    x, y = d.xpos[obj.body][:2] if xy is None else xy
+    # Off the exact axis: a ray through a mesh vertex can slip between its triangles.
+    x, y = x + 5e-4, y + 5e-4
+    top = max(geom_mesh(obj, g).vertices[:, 2].max() for g in visual_geoms(obj)) + 0.1
+    groups = np.zeros(6, dtype=np.uint8)
+    groups[VISUAL_GROUP] = 1
+    hit = np.zeros(1, dtype=np.int32)
+    dist = mujoco.mj_ray(m, d, np.array([x, y, top]), np.array([0.0, 0.0, -1.0]), groups, 1, -1, hit)
+    if dist < 0:
+        raise ValueError(f"{obj.name}: no visual surface below ({x:.3f}, {y:.3f})")
+    return top - dist
+
+
+def floor_gap(obj: Compiled, xy: tuple[float, float] | None = None) -> float:
+    """Millimetres between where a 1 cm sphere dropped at ``xy`` comes to rest, held in
+    the fixed object, and the visual surface beneath it. A filled interior shows as a
+    gap the size of its depth."""
+    floor = visual_floor(obj, xy)
+    scene = mujoco.MjSpec()
+    scene.option.timestep = 0.002
+    scene.worldbody.add_geom(type=mujoco.mjtGeom.mjGEOM_PLANE, size=[2, 2, 0.1])
+    source = obj.spec.copy()
+    scene.worldbody.add_frame().attach_body(next(iter(source.worldbody.bodies)), "obj/", "")
+    for joint in list(scene.joints):
+        scene.delete(joint)
+    x, y = obj.data.xpos[obj.body][:2] if xy is None else xy
+    top = max(geom_mesh(obj, g).vertices[:, 2].max() for g in collision_geoms(obj))
+    probe = scene.worldbody.add_body(name="probe", pos=[x, y, top + 0.05])
+    probe.add_freejoint()
+    probe.add_geom(type=mujoco.mjtGeom.mjGEOM_SPHERE, size=[_PROBE_RADIUS, 0, 0], mass=0.02)
+    model = scene.compile()
+    data = mujoco.MjData(model)
+    for _ in range(1500):
+        mujoco.mj_step(model, data)
+    rest = data.xpos[mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "probe")][2] - _PROBE_RADIUS
+    return _mm(1e3 * (rest - floor))
+
+
+# ------------------------------------------------------------------------- checks
+
+
+@dataclass
+class Report:
+    name: str
+    fit: Fit
+    failures: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.failures
+
+    def __str__(self) -> str:
+        f = self.fit
+        lines = [
+            f"{self.name}: {'OK' if self.ok else 'FAIL'}",
+            f"  visual outside collision  p99 {f.visual_outside_p99:6.1f} mm  max {f.visual_outside_max:6.1f} mm",
+            f"  collision beyond visual   p99 {f.collision_excess_p99:6.1f} mm  max {f.collision_excess_max:6.1f} mm",
+            f"  visual below collision        {f.sink:6.1f} mm   collision bottom at {f.resting:6.1f} mm",
+            f"  extent visual {f.visual_extent} mm  collision {f.collision_extent} mm",
+        ]
+        if f.floor_gap is not None:
+            lines.append(f"  dropped sphere rests       {f.floor_gap:6.1f} mm above the visual floor")
+        lines += [f"  - {msg}" for msg in self.failures]
+        return "\n".join(lines)
+
+
+def tolerances(obj: Compiled) -> dict[str, float]:
+    """Defaults, widened by the object's ``geometric_properties.collision_tolerance_mm``."""
+    declared = dict(obj.meta.get("geometric_properties", {}).get("collision_tolerance_mm") or {})
+    if declared and not declared.pop("reason", None):
+        raise ValueError(f"{obj.name}: collision_tolerance_mm must state a reason")
+    unknown = set(declared) - set(DEFAULT_TOLERANCE_MM)
+    if unknown:
+        raise ValueError(f"{obj.name}: unknown collision tolerances {sorted(unknown)}")
+    return {**DEFAULT_TOLERANCE_MM, **declared}
+
+
+def check(obj: Compiled | str | Path) -> Report:
+    """Check an object against the conventions in the README and the tolerances above."""
+    if not isinstance(obj, Compiled):
+        obj = load(obj)
+    m = obj.model
+    failures = []
+
+    fixture = "fixture" in (obj.meta.get("category") or [])
+    free = [j for j in range(m.njnt) if m.jnt_bodyid[j] == obj.body and m.jnt_type[j] == mujoco.mjtJoint.mjJNT_FREE]
+    if not fixture and not free:
+        failures.append("no free joint on the top-level body (required unless category includes 'fixture')")
+    collision = collision_geoms(obj)
+    visual = visual_geoms(obj)
+    if not collision:
+        failures.append("no collision geoms")
+    # An object without a visual mesh renders its collision geoms; they are its shape,
+    # so there is nothing to compare them with.
+    if visual and any(m.geom_group[g] != COLLISION_GROUP for g in collision):
+        failures.append(f"collision geoms must be in group {COLLISION_GROUP} when a visual mesh is present")
+    # A visual geom left at MuJoCo's default density adds mass, so this also catches it.
+    if "mass" in obj.meta and not math.isclose(m.body_mass[1:].sum(), obj.meta["mass"], abs_tol=1e-6):
+        failures.append(f"compiled mass {m.body_mass[1:].sum():.4f} kg != declared {obj.meta['mass']} kg")
+    if not collision or not visual:
+        return Report(obj.name, Fit(*([math.nan] * 6), None, [], []), failures)
+
+    fit = collision_fit(obj)
+    tol = tolerances(obj)
+    limits = [
+        ("visual_outside", fit.visual_outside_p99, "visual mesh lies outside the collision geoms (undersized)"),
+        ("collision_excess", fit.collision_excess_p99, "collision geoms extend beyond the visual mesh"),
+        ("sink", fit.sink, "visual mesh reaches below the collision geometry and sinks into a support"),
+        ("resting", abs(fit.resting), "the model file's pose does not rest the object on z = 0"),
+    ]
+    if fit.floor_gap is not None:
+        limits.append(("floor_gap", abs(fit.floor_gap), "a dropped object does not reach the visual inner floor"))
+    for key, value, why in limits:
+        if value > tol[key]:
+            failures.append(f"{why}: {value:.1f} mm > {tol[key]:.1f} mm ({key})")
+    return Report(obj.name, fit, failures)
+
+
+# ----------------------------------------------------------------------- building
+
+
+@dataclass
+class GeomSpec:
+    """A collision primitive in the body frame: MuJoCo type name, half-sizes, pose."""
+
+    type: str
+    size: list[float]
+    pos: list[float]
+    quat: list[float] = field(default_factory=lambda: [1.0, 0.0, 0.0, 0.0])
+    extra: dict[str, str] = field(default_factory=dict)  # further MJCF attributes, e.g. solref
+
+    @property
+    def volume(self) -> float:
+        s = self.size
+        if self.type == "box":
+            return 8 * s[0] * s[1] * s[2]
+        if self.type == "cylinder":
+            return math.pi * s[0] ** 2 * 2 * s[1]
+        if self.type == "sphere":
+            return 4 / 3 * math.pi * s[0] ** 3
+        if self.type == "capsule":
+            return math.pi * s[0] ** 2 * (2 * s[1] + 4 / 3 * s[0])
+        raise ValueError(f"unsupported geom type {self.type!r}")
+
+
+def hull_of(mesh: str) -> GeomSpec:
+    """A mesh geom on the model's asset ``mesh``, which MuJoCo collides as its convex hull:
+    exact for a convex object without a cavity whose faces bulge or whose edges are
+    rounded too much for a box (a soft bag, a pillow). Use it alone; mass then needs no
+    volume. MuJoCo makes one contact per hull pair by default, so check that the object
+    rests and stacks stably."""
+    return GeomSpec("mesh", [], [0.0, 0.0, 0.0], extra={"mesh": mesh})
+
+
+def fit_box(points: np.ndarray) -> GeomSpec:
+    """The axis-aligned box bounding ``points`` (body frame)."""
+    lo, hi = points.min(axis=0), points.max(axis=0)
+    return GeomSpec("box", list((hi - lo) / 2), list(np.round((hi + lo) / 2, 4)))
+
+
+def radius_profile(points: np.ndarray, edges: np.ndarray) -> list[tuple[float, float, float, float]]:
+    """Per height band ``[z0, z1)`` of ``edges``: (z0, z1, inner radius, outer radius)
+    of ``points`` (body frame) about the body's z axis. Bands with no points are skipped."""
+    r = np.linalg.norm(points[:, :2], axis=1)
+    out = []
+    for z0, z1 in zip(edges[:-1], edges[1:]):
+        band = r[(points[:, 2] >= z0) & (points[:, 2] <= z1)]
+        if len(band):
+            out.append((float(z0), float(z1), float(band.min()), float(band.max())))
+    return out
+
+
+def stacked_cylinders(points: np.ndarray, band: float = 0.005, merge: float = 0.002) -> list[GeomSpec]:
+    """Coaxial cylinders that enclose ``points`` (body frame) band by band, merging
+    neighbouring bands whose radii differ by less than ``merge`` (m). Suits bottles and
+    other solids of revolution with no interior to reach into."""
+    z0, z1 = points[:, 2].min(), points[:, 2].max()
+    edges = np.linspace(z0, z1, max(1, round((z1 - z0) / band)) + 1)
+    runs: list[list[float]] = []
+    for lo, hi, _, outer in radius_profile(points, edges):
+        if runs and abs(runs[-1][2] - outer) < merge:
+            runs[-1][1], runs[-1][2] = hi, max(runs[-1][2], outer)
+        else:
+            runs.append([lo, hi, outer])
+    return [GeomSpec("cylinder", [r, (hi - lo) / 2], [0.0, 0.0, (hi + lo) / 2]) for lo, hi, r in runs]
+
+
+def revolved_shell(
+    profile: list[tuple[float, float]],
+    thickness: float | list[float],
+    floor: tuple[float, float, float],
+    segments: int = 16,
+) -> list[GeomSpec]:
+    """An open container of revolution as boxes: a floor disc and a ring of ``segments``
+    wall boxes for each consecutive pair of ``profile`` points.
+
+    ``profile`` lists (z, outer radius) up the wall from the floor's edge to the rim;
+    each wall box's outer face lies on the profile. ``thickness`` is the wall's thickness
+    normal to its surface, one value or one per band. ``floor`` is (bottom z, top z,
+    radius). ``fit_revolved_shell`` measures all three from a visual mesh.
+    """
+    bottom, top, radius = floor
+    geoms = [GeomSpec("cylinder", [radius, (top - bottom) / 2], [0.0, 0.0, (top + bottom) / 2])]
+    bands = list(zip(profile[:-1], profile[1:]))
+    widths = [thickness] * len(bands) if isinstance(thickness, (int, float)) else list(thickness)
+    if len(widths) != len(bands):
+        raise ValueError(f"{len(widths)} thicknesses for {len(bands)} wall bands")
+    for ((za, ra), (zb, rb)), thickness in zip(bands, widths):
+        length = math.hypot(zb - za, rb - ra)
+        tilt = math.atan2(rb - ra, zb - za)  # outward lean of the wall from vertical
+        # Mid-wall radius, and the box's width: the outer arc's chord, plus overlap.
+        mid_r = (ra + rb) / 2 - thickness / 2 * math.cos(tilt)
+        width = 2 * max(ra, rb) * math.tan(math.pi / segments) * 1.05
+        zc = (za + zb) / 2 + thickness / 2 * math.sin(tilt)
+        for k in range(segments):
+            phi = 2 * math.pi * k / segments
+            # Box axes: x radial (thickness), y tangential (width), z along the wall.
+            # Rotate about z by phi, then lean outward about the local y axis by tilt.
+            quat = np.zeros(4)
+            mujoco.mju_mulQuat(quat, _axis_quat([0, 0, 1], phi), _axis_quat([0, 1, 0], tilt))
+            geoms.append(
+                GeomSpec(
+                    "box",
+                    [thickness / 2, width / 2, length / 2],
+                    [mid_r * math.cos(phi), mid_r * math.sin(phi), zc],
+                    list(quat),
+                )
+            )
+    return geoms
+
+
+def fit_revolved_shell(
+    points: np.ndarray,
+    floor_top: float,
+    bands: int = 6,
+    segments: int = 16,
+    min_thickness: float = 0.003,
+) -> list[GeomSpec]:
+    """``revolved_shell`` measured from ``points`` (body frame) of an open object of
+    revolution about the body's z axis, such as a cup, bowl or plate. ``floor_top`` is
+    the inner floor's height (``visual_floor`` gives it). The wall is split into
+    ``bands`` equal heights; each band's outer radius and normal thickness come from the
+    points, and the floor disc spans the wall's outer radius at the floor."""
+    r = np.linalg.norm(points[:, :2], axis=1)
+    z = points[:, 2]
+    bottom, rim = z.min(), z.max()
+    edges = np.linspace(floor_top, rim, bands + 1)
+    step = (rim - floor_top) / bands
+
+    def outer(at: float) -> float:
+        near = np.abs(z - at) <= max(step / 4, 0.001)
+        return float(r[near].max())
+
+    profile = [(float(e), outer(e)) for e in edges]
+    thickness = []
+    for (za, ra), (zb, rb) in zip(profile[:-1], profile[1:]):
+        # Inner radius in the band's middle half, above the floor's own surface.
+        mid = (z > za + step / 4) & (z < zb - step / 4)
+        horizontal = (ra + rb) / 2 - float(r[mid].min())
+        tilt = math.atan2(rb - ra, zb - za)
+        thickness.append(max(horizontal * math.cos(tilt), min_thickness))
+    # The floor disc takes the radius the object stands on. Where that foot is narrower
+    # than the wall at the floor's top (a plate's), one more band covers its flank.
+    foot = outer(bottom)
+    if floor_top - bottom > 0.002 and profile[0][1] - foot > 0.001:
+        profile.insert(0, (float(bottom), foot))
+        thickness.insert(0, thickness[0])
+    return revolved_shell(profile, thickness, (float(bottom), floor_top, foot), segments)
+
+
+def tapered_open_box(
+    bottom_inner: tuple[float, float],
+    top_inner: tuple[float, float],
+    height: float,
+    wall: tuple[float, float],
+    floor: float,
+    floor_extra: dict[str, str] | None = None,
+) -> list[GeomSpec]:
+    """A floor and four walls resting on z = 0, centred on the body's z axis, whose inner
+    faces run from the half-extents ``bottom_inner`` (x, y) at the floor's top to
+    ``top_inner`` at ``height``. ``wall`` is the (x-wall, y-wall) thickness. Walls lean
+    outward when the top is wider, as moulded totes and trays do."""
+    geoms = []
+    for ax in (0, 1):
+        lo, hi, t = bottom_inner[ax], top_inner[ax], wall[ax]
+        rise = height - floor
+        length = math.hypot(rise, hi - lo)
+        tilt = math.atan2(hi - lo, rise)
+        # Centre: the inner face's midpoint, moved half a thickness outward along the normal.
+        centre = (lo + hi) / 2 + t / 2 * math.cos(tilt)
+        zc = floor + rise / 2 - t / 2 * math.sin(tilt)
+        # The x walls (normal along x) span the y extent between the y walls' outer faces.
+        span = max(bottom_inner[1 - ax], top_inner[1 - ax]) + (wall[1] if ax == 0 else 0.0)
+        for side in (1, -1):
+            pos = [0.0, 0.0, zc]
+            pos[ax] = side * centre
+            size = [0.0, 0.0, length / 2]
+            size[ax], size[1 - ax] = t / 2, span
+            # Lean outward: rotate about the in-plane axis perpendicular to the normal.
+            axis = [0.0, 0.0, 0.0]
+            axis[1 - ax] = 1.0
+            angle = side * tilt * (1 if ax == 0 else -1)
+            geoms.append(GeomSpec("box", size, pos, list(_axis_quat(axis, angle))))
+    bottom_x, bottom_y = bottom_inner[0] + wall[0], bottom_inner[1] + wall[1]
+    geoms.insert(0, GeomSpec("box", [bottom_x, bottom_y, floor / 2], [0.0, 0.0, floor / 2], extra=floor_extra or {}))
+    return geoms
+
+
+def open_box(outer: tuple[float, float, float], wall: float, floor: float) -> list[GeomSpec]:
+    """A floor and four vertical walls: an open box of ``outer`` size resting on z = 0."""
+    inner = (outer[0] / 2 - wall, outer[1] / 2 - wall)
+    return tapered_open_box(inner, inner, outer[2], (wall, wall), floor)
+
+
+def geoms_xml(name: str, geoms: list[GeomSpec], mass: float, friction=(0.6, 0.005, 0.0001), indent: int = 6) -> str:
+    """MJCF for collision ``geoms`` sharing ``mass`` in proportion to volume, following the
+    package conventions (group 3, condim 4, mass on the collision geoms). A lone geom takes
+    all of it, which lets a mesh geom (``hull_of``) carry the mass without a volume."""
+    shares = [1.0] if len(geoms) == 1 else [g.volume for g in geoms]
+    total = sum(shares)
+    pad = " " * indent
+    lines = []
+    for i, (g, share) in enumerate(zip(geoms, shares)):
+        attrs = [
+            f'name="{name}_collision_{i}"' if len(geoms) > 1 else f'name="{name}_collision"',
+            f'type="{g.type}"',
+        ]
+        if g.type != "mesh":
+            attrs.append(f'size="{_fmt(g.size[: {"box": 3, "cylinder": 2, "capsule": 2, "sphere": 1}[g.type]])}"')
+        attrs.append(f'pos="{_fmt(g.pos)}"')
+        if not np.allclose(g.quat, [1, 0, 0, 0]):
+            attrs.append(f'quat="{_fmt(g.quat)}"')
+        attrs += [f'{k}="{v}"' for k, v in g.extra.items()]
+        attrs += [
+            f'mass="{mass * share / total:.6g}"',
+            f'friction="{_fmt(friction)}"',
+            f'group="{COLLISION_GROUP}" condim="4" contype="1" conaffinity="1"',
+        ]
+        lines.append(f"{pad}<geom {' '.join(attrs)}/>")
+    return "\n".join(lines)
+
+
+def write_model(
+    obj_dir: Path,
+    name: str,
+    visual_mesh: str,
+    geoms: list[GeomSpec],
+    mass: float,
+    texture: str | None = None,
+    rgba: tuple[float, float, float, float] = (0.7, 0.7, 0.7, 1.0),
+    body_pos: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    friction=(0.6, 0.005, 0.0001),
+) -> Path:
+    """Write ``<obj_dir>/<name>.xml``: a free body at ``body_pos`` with a massless visual
+    mesh (group 2) and the given collision geoms carrying ``mass``. Returns its path."""
+    if texture:
+        material = (
+            f'    <texture name="{name}_tex" type="2d" file="{texture}"/>\n'
+            f'    <material name="{name}_mat" texture="{name}_tex" specular="0.5" shininess="0.5"/>\n'
+        )
+    else:
+        material = f'    <material name="{name}_mat" rgba="{_fmt(rgba)}" specular="0.5" shininess="0.5"/>\n'
+    xml = (
+        f'<mujoco model="{name}">\n'
+        '  <compiler angle="radian"/>\n\n'
+        "  <asset>\n"
+        f"{material}"
+        f'    <mesh name="{name}_visual" file="{visual_mesh}"/>\n'
+        "  </asset>\n\n"
+        "  <worldbody>\n"
+        f'    <body name="{name}" pos="{_fmt(body_pos)}">\n'
+        f'      <freejoint name="{name}_joint"/>\n'
+        f"{geoms_xml(name, geoms, mass, friction)}\n"
+        f'      <geom name="{name}_visual" type="mesh" mesh="{name}_visual" material="{name}_mat"\n'
+        f'            group="{VISUAL_GROUP}" mass="0" contype="0" conaffinity="0"/>\n'
+        "    </body>\n"
+        "  </worldbody>\n"
+        "</mujoco>\n"
+    )
+    path = Path(obj_dir) / f"{name}.xml"
+    path.write_text(xml)
+    return path
+
+
+def replace_collision_geoms(
+    xml_path: Path,
+    name: str,
+    geoms: list[GeomSpec],
+    mass: float,
+    friction=(0.6, 0.005, 0.0001),
+    body_pos: tuple[float, float, float] | None = None,
+    comment: str | None = None,
+) -> None:
+    """Rewrite an existing model's collision geoms (and optionally its body's ``pos``),
+    leaving its assets and visual geom untouched. The new geoms go where the first old one
+    was; ``comment`` replaces the XML comment directly above it, or is added there."""
+    text = Path(xml_path).read_text()
+    blocks = [b for b in re.finditer(r"[ \t]*<geom\b[^>]*?/>\n?", text, re.S) if _is_collision_xml(b.group(0))]
+    if not blocks:
+        raise ValueError(f"{xml_path}: no collision geoms found")
+    indent = len(blocks[0].group(0)) - len(blocks[0].group(0).lstrip(" "))
+    new = geoms_xml(name, geoms, mass, friction, indent) + "\n"
+    if comment is not None:
+        new = " " * indent + f"<!-- {comment} -->\n" + new
+    for b in reversed(blocks):
+        start = b.start()
+        # Comments directly above a removed geom (blank lines between allowed) described
+        # it; drop them too, except the first geom's when no replacement comment is given.
+        above = re.search(r"(?:[ \t]*<!--[^\n]*?-->\n(?:[ \t]*\n)*)+\Z", text[:start])
+        if above and (b is not blocks[0] or comment is not None):
+            start = above.start()
+        text = text[:start] + (new if b is blocks[0] else "") + text[b.end() :]
+    text = re.sub(r"\n(?:[ \t]*\n){2,}", "\n\n", text)
+    if body_pos is not None:
+        text, n = re.subn(
+            rf'(<body\b[^>]*\bname="{re.escape(name)}"[^>]*?\bpos=")[^"]*(")',
+            rf"\g<1>{_fmt(body_pos)}\g<2>",
+            text,
+            count=1,
+        )
+        if not n:
+            raise ValueError(f'{xml_path}: no <body name="{name}" pos="..."> to move')
+    Path(xml_path).write_text(text)
+
+
+def _is_collision_xml(geom: str) -> bool:
+    attrs = dict(re.findall(r'(\w+)="([^"]*)"', geom))
+    return attrs.get("contype", "1") != "0" or attrs.get("conaffinity", "1") != "0"
+
+
+def write_meta(obj_dir: Path, name: str, **fields) -> Path:
+    """Write ``<obj_dir>/meta.yaml`` with ``name``, ``mujoco.xml_path`` and ``fields``
+    (description, category, mass, dimensions, geometric_properties, perception, ...)."""
+    meta = {"name": name, **fields}
+    meta.setdefault("mujoco", {})["xml_path"] = f"{name}.xml"
+    path = Path(obj_dir) / "meta.yaml"
+    path.write_text(yaml.safe_dump(meta, sort_keys=False))
+    return path
+
+
+# -------------------------------------------------------------------------- utils
+
+
+def _pose(pos, xmat) -> np.ndarray:
+    T = np.eye(4)
+    T[:3, :3] = np.asarray(xmat).reshape(3, 3)
+    T[:3, 3] = pos
+    return T
+
+
+def _axis_quat(axis, angle: float) -> np.ndarray:
+    q = np.zeros(4)
+    mujoco.mju_axisAngle2Quat(q, np.asarray(axis, dtype=float), angle)
+    return q
+
+
+def _fmt(values) -> str:
+    # Rounded to 10 micrometres (and 1e-5 in quaternions), dropping sampling noise.
+    return " ".join(f"{round(float(v), 5) + 0.0:.6g}" for v in values)
+
+
+def _mm(value: float) -> float:
+    return round(float(value), 2)
