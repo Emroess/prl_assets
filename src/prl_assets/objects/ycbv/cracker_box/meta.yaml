@@ -1,0 +1,53 @@
+name: cracker_box
+description: Cheez-It crackers box
+category: [food_package, graspable, box]
+
+mass: 0.4  # kg
+dimensions: [0.062, 0.162, 0.208]  # meters
+material: cardboard
+amazon_link: https://www.amazon.com/dp/B00THJKCUI
+
+geometric_properties:
+  type: box
+  size: [0.062, 0.162, 0.208]
+
+mujoco:
+  xml_path: cracker_box.xml
+  scale: 1.0
+  friction: [0.7, 0.005, 0.0001]
+
+perception:
+  aliases: ["cracker box", "cheez-it", "crackers", "003_cracker_box"]
+
+policy:
+  grasping:
+    affordances: [lift, place]
+    preferred_grasp_type: side_grasp
+    difficulty: easy
+  manipulation:
+    stable_poses: [upright, on_side, on_back]
+
+# YCB-Video identity and frame: see docs/schema.md.
+dataset:
+  ycbv:
+    bop_id: 2
+    ycb_name: 003_cracker_box
+
+frames:
+  # p_asset = T_asset_bop @ p_bop, after converting BOP model points from mm to m.
+  T_asset_bop:
+    - [1, 0, 0, 0]
+    - [0, 1, 0, 0]
+    - [0, 0, 1, 0]
+    - [0, 0, 0, 1]
+
+symmetries:
+  frame: bop
+  discrete: []
+  continuous: []
+
+provenance:
+  geometry: ported from gcu_objects (prl_assets#4); a 16384-face remesh of the YCB scan, upstream file not recorded
+  reference_model: models/obj_000002.ply in the pinned BOP ycbv_models.zip; agreement in docs/ycbv_audit.json
+  license: CC-BY-4.0
+  attribution: YCB Object and Model Set (see objects/ycbv/NOTICE.md)

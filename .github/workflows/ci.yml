@@ -30,6 +30,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
+      # asset_manager is a sibling package, not a prl_assets dependency; without it the
+      # registry tests skip. Pinned to the v0.2.0 commit.
+      - name: Install asset_manager for the registry tests
+        run: uv pip install "asset-manager @ git+https://github.com/personalrobotics/asset_manager.git@f421eb375fe76a0d9c69dcf0dd08ef48d718a969"
+
       - name: Ruff lint
         run: uv run ruff check .
 
@@ -44,8 +49,39 @@ jobs:
             echo "No tests/ directory; skipping pytest."
           fi
 
+  ycbv-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      # The pinned BOP archive (525 MB); the audit verifies its SHA-256 before use.
+      - name: Cache the BOP YCB-V models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/prl_assets
+          key: bop-ycbv-models-1e517a9b513cadb8eaf406ac3ce3c5f1d6fc4a80161c866b4e2a73d13de5e554
+
+      - name: YCB-V frames agree with the BOP models
+        run: uv run python scripts/audit_ycbv.py --out artifacts/ycbv_audit.json
+
+      - name: Keep the audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ycbv-audit
+          path: artifacts/ycbv_audit.json
+
   notify-robot-code:
-    needs: test
+    needs: [test, ycbv-audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
