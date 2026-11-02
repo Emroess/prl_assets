@@ -69,8 +69,9 @@ against each scan's extent along the asset axes:
 The cracker box's visual mesh therefore extends about 5 mm beyond its collision box on
 each broad face and sinks 2.7 mm into a supporting surface. A pose estimated from the
 BOP model and placed in simulation keeps the visual right but contacts about 5 mm
-early, which matters for grasping. That model is corrected as the collection's importer
-lands; the other three differ by about 2 mm or less.
+early, which matters for grasping. Issue #30 corrected it: the cracker box and the gelatin
+box now bound their scans, and every object's collision geometry is checked against its
+visual mesh in CI (see [the schema](schema.md#collision-geometry)).
 
 ## Moved paths
 

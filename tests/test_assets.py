@@ -188,7 +188,7 @@ class TestPinchTorsion:
     _SETTLE_STEPS, _TORQUE_STEPS = 100, 250
     _FRACTION = 0.1
     # Measured with the two-point pinch below: 0.42-3.04 rad with condim 3; 0.024 rad with
-    # condim 4 (0.059 for the bowl, a convex-hull mesh).
+    # condim 4 (0.069 for the bowl, whose sloped wall the probes press on).
     _MAX_SPIN = 0.1  # rad
 
     @staticmethod

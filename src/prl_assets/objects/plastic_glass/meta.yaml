@@ -10,6 +10,7 @@ material: plastic
 # Geometric properties for grasp planning
 geometric_properties:
   type: cylinder
+  open: true  # things can be put inside; see docs/schema.md
   radius: 0.048  # meters
   height: 0.171  # meters
 

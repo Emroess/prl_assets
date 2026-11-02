@@ -8,17 +8,11 @@
   </asset>
 
   <worldbody>
-    <body name="lunchbox" pos="0 0 0.049">
+    <body name="lunchbox" pos="0 0 0.05187">
       <freejoint name="lunchbox_joint"/>
 
-      <!-- Collision geometry - box -->
-      <geom condim="4" name="lunchbox_collision" group="3"
-            type="box"
-            size="0.13 0.1 0.049"
-            mass="0.4"
-            friction="0.7 0.005 0.0001"
-            contype="1"
-            conaffinity="1"/>
+      <!-- Collision geometry: the visual mesh's convex hull (authoring.hull_of); no box fits the bag's bulging faces -->
+      <geom name="lunchbox_collision" type="mesh" pos="0 0 0" mesh="lunchbox_visual" mass="0.4" friction="0.7 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
 
       <!-- Visual mesh -->
       <geom name="lunchbox_visual" group="2" mass="0"

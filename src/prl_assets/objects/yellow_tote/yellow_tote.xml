@@ -10,56 +10,16 @@
     <body name="yellow_tote" pos="0 0 0">
       <freejoint name="yellow_tote_joint"/>
 
-      <!-- Collision geometry - hollow tote (floor + 4 walls) -->
-      <!-- Floor -->
-      <geom name="yellow_tote_floor" group="3"
-            type="box"
-            pos="0 0 0.005"
-            size="0.3 0.19 0.005"
-            mass="0.3"
-            friction="0.7 0.005 0.0001"
-            contype="1"
-            conaffinity="1"/>
-
-      <!-- Front wall (negative Y) -->
-      <geom name="yellow_tote_wall_front" group="3"
-            type="box"
-            pos="0 -0.19 0.145"
-            size="0.3 0.02 0.14"
-            mass="0.1"
-            friction="0.7 0.005 0.0001"
-            contype="1"
-            conaffinity="1"/>
-
-      <!-- Back wall (positive Y) -->
-      <geom name="yellow_tote_wall_back" group="3"
-            type="box"
-            pos="0 0.19 0.145"
-            size="0.3 0.02 0.14"
-            mass="0.1"
-            friction="0.7 0.005 0.0001"
-            contype="1"
-            conaffinity="1"/>
-
-      <!-- Left wall (negative X) -->
-      <geom name="yellow_tote_wall_left" group="3"
-            type="box"
-            pos="-0.27 0 0.145"
-            size="0.03 0.17 0.14"
-            mass="0.1"
-            friction="0.7 0.005 0.0001"
-            contype="1"
-            conaffinity="1"/>
-
-      <!-- Right wall (positive X) -->
-      <geom name="yellow_tote_wall_right" group="3"
-            type="box"
-            pos="0.27 0 0.145"
-            size="0.03 0.17 0.14"
-            mass="0.1"
-            friction="0.7 0.005 0.0001"
-            contype="1"
-            conaffinity="1"/>
+      <!-- Collision geometry: floor, tapered walls following the visual's inner faces (authoring.tapered_open_box), rim lip -->
+      <geom name="yellow_tote_collision_0" type="box" size="0.26887 0.17482 0.00176" pos="0 0 0.00176" solref="0.004 1" mass="0.0548052" friction="0.7 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="yellow_tote_collision_1" type="box" size="0.013 0.18909 0.13327" pos="0.26022 0 0.13631" quat="0.99987 0 0.01637 0" mass="0.216454" friction="0.7 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="yellow_tote_collision_2" type="box" size="0.013 0.18909 0.13327" pos="-0.26022 0 0.13631" quat="0.99987 0 -0.01637 0" mass="0.216454" friction="0.7 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="yellow_tote_collision_3" type="box" size="0.25159 0.0025 0.13339" pos="0 0.17945 0.1366" quat="0.99964 -0.02676 0 0" mass="0.0554344" friction="0.7 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="yellow_tote_collision_4" type="box" size="0.25159 0.0025 0.13339" pos="0 -0.17945 0.1366" quat="0.99964 0.02676 0 0" mass="0.0554344" friction="0.7 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="yellow_tote_collision_5" type="box" size="0.0105 0.17 0.03" pos="0.2855 0 0.24" mass="0.0353809" friction="0.7 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="yellow_tote_collision_6" type="box" size="0.0105 0.17 0.03" pos="-0.2855 0 0.24" mass="0.0353809" friction="0.7 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="yellow_tote_collision_7" type="box" size="0.29 0.008 0.01" pos="0 0.192 0.26" mass="0.0153284" friction="0.7 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="yellow_tote_collision_8" type="box" size="0.29 0.008 0.01" pos="0 -0.192 0.26" mass="0.0153284" friction="0.7 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
 
       <!-- Visual mesh -->
       <geom name="yellow_tote_visual" group="2" mass="0"

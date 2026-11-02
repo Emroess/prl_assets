@@ -10,6 +10,9 @@ amazon_link: https://www.amazon.com/dp/B0D9V7L13T
 geometric_properties:
   type: box
   size: [0.102, 0.058, 0.084]
+  collision_tolerance_mm:
+    collision_excess: 11.5
+    reason: "the can's corners are rounded (radius about 15 mm); the box keeps flat faces for resting and face grasps"
 
 mujoco:
   xml_path: spam_can.xml

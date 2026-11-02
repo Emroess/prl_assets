@@ -10,6 +10,9 @@ amazon_link: https://www.amazon.com/dp/B00F9XCEMK
 geometric_properties:
   type: box
   size: [0.150, 0.084, 0.032]
+  collision_tolerance_mm:
+    collision_excess: 6.5
+    reason: "the tin's rim and corners are rounded; the box and end cylinders keep flat faces for resting"
 
 mujoco:
   xml_path: herring_tin.xml

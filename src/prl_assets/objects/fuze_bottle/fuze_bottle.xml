@@ -8,17 +8,21 @@
   </asset>
 
   <worldbody>
-    <body name="fuze_bottle" pos="0 0 0.1075">
+    <body name="fuze_bottle" pos="0 0 0.10756">
       <freejoint name="fuze_bottle_joint"/>
 
-      <!-- Collision geometry - cylinder approximation -->
-      <geom condim="4" name="fuze_bottle_collision" group="3"
-            type="cylinder"
-            size="0.037 0.1075"
-            mass="0.4"
-            friction="0.8 0.005 0.0001"
-            contype="1"
-            conaffinity="1"/>
+      <!-- Collision geometry: body, shoulder and neck as authoring.stacked_cylinders of the visual mesh -->
+      <geom name="fuze_bottle_collision_0" type="cylinder" size="0.0369 0.05229" pos="0 0 -0.05528" mass="0.261219" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="fuze_bottle_collision_1" type="cylinder" size="0.03528 0.00448" pos="0 0 0.00149" mass="0.0204652" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="fuze_bottle_collision_2" type="cylinder" size="0.03373 0.00448" pos="0 0 0.01045" mass="0.0187018" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="fuze_bottle_collision_3" type="cylinder" size="0.03152 0.00299" pos="0 0 0.01792" mass="0.0108919" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="fuze_bottle_collision_4" type="cylinder" size="0.02978 0.00299" pos="0 0 0.0239" mass="0.00972104" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="fuze_bottle_collision_5" type="cylinder" size="0.02787 0.00299" pos="0 0 0.02988" mass="0.0085146" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="fuze_bottle_collision_6" type="cylinder" size="0.02566 0.00299" pos="0 0 0.03585" mass="0.0072175" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="fuze_bottle_collision_7" type="cylinder" size="0.02415 0.00448" pos="0 0 0.04332" mass="0.00959361" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="fuze_bottle_collision_8" type="cylinder" size="0.0225 0.00598" pos="0 0 0.05378" mass="0.0110993" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="fuze_bottle_collision_9" type="cylinder" size="0.02222 0.02241" pos="0 0 0.08216" mass="0.0405868" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
+      <geom name="fuze_bottle_collision_10" type="cylinder" size="0.01905 0.00149" pos="0 0 0.10606" mass="0.0019896" friction="0.8 0.005 0.0001" group="3" condim="4" contype="1" conaffinity="1"/>
 
       <!-- Visual mesh -->
       <geom name="fuze_bottle_visual" group="2" mass="0"
