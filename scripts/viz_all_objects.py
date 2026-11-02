@@ -45,7 +45,8 @@ def create_scene_xml():
     bodies = []
 
     for i, obj_name in enumerate(OBJECTS):
-        obj_dir = OBJECTS_DIR / obj_name
+        # Objects may sit in collection subdirectories (e.g. ycbv/).
+        obj_dir = next(OBJECTS_DIR.rglob(f"{obj_name}/meta.yaml")).parent
         xml_path = obj_dir / f"{obj_name}.xml"
 
         if not xml_path.exists():

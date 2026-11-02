@@ -15,7 +15,8 @@ OBJECTS_DIR = Path(__file__).parent.parent / "src" / "prl_assets" / "objects"
 
 def load_object_xml(obj_name):
     """Load and return processed XML content for an object."""
-    obj_dir = OBJECTS_DIR / obj_name
+    # Objects may sit in collection subdirectories (e.g. ycbv/).
+    obj_dir = next(OBJECTS_DIR.rglob(f"{obj_name}/meta.yaml")).parent
     xml_path = obj_dir / f"{obj_name}.xml"
 
     if not xml_path.exists():
