@@ -139,7 +139,11 @@ class TestMuJoCoIntegration:
 
 
 def _object_dirs() -> list[Path]:
-    return sorted(d for d in OBJECTS_DIR.iterdir() if (d / "meta.yaml").exists())
+    """Every object directory, including those in collection subdirectories such as ycbv/."""
+    return sorted((meta.parent for meta in OBJECTS_DIR.rglob("meta.yaml")), key=lambda d: d.name)
+
+
+_OBJECT_DIR = {d.name: d for d in _object_dirs()}
 
 
 @pytest.mark.parametrize("obj_dir", _object_dirs(), ids=lambda d: d.name)
@@ -183,7 +187,7 @@ class TestPinchTorsion:
     @staticmethod
     def _graspable() -> list[str]:
         out = []
-        for d in sorted(OBJECTS_DIR.iterdir()):
+        for d in _object_dirs():
             meta = d / "meta.yaml"
             if meta.is_file() and "graspable" in (yaml.safe_load(meta.read_text()).get("category") or []):
                 out.append(d.name)
@@ -192,8 +196,8 @@ class TestPinchTorsion:
     @pytest.mark.parametrize("name", _graspable.__func__())
     def test_a_pinched_object_does_not_spin(self, name):
         mujoco = pytest.importorskip("mujoco")
-        meta = yaml.safe_load((OBJECTS_DIR / name / "meta.yaml").read_text())
-        spec = mujoco.MjSpec.from_file(str(OBJECTS_DIR / name / meta["mujoco"]["xml_path"]))
+        meta = yaml.safe_load((_OBJECT_DIR[name] / "meta.yaml").read_text())
+        spec = mujoco.MjSpec.from_file(str(_OBJECT_DIR[name] / meta["mujoco"]["xml_path"]))
         spec.option.gravity = [0.0, 0.0, 0.0]
         spec.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
         spec.option.impratio = 10.0
@@ -274,7 +278,7 @@ class TestBinCatches:
         inner = bin_meta["geometric_properties"]["inner_size"]
         out = []
         for name in TestPinchTorsion._graspable():
-            g = yaml.safe_load((OBJECTS_DIR / name / "meta.yaml").read_text())["geometric_properties"]
+            g = yaml.safe_load((_OBJECT_DIR[name] / "meta.yaml").read_text())["geometric_properties"]
             if g["type"] == "box":
                 footprint = g["size"][:2]
             elif g["type"] == "cylinder":
@@ -306,8 +310,8 @@ class TestBinCatches:
         for joint in list(spec.joints):
             if joint.name.startswith("bin/"):
                 spec.delete(joint)
-        meta = yaml.safe_load((OBJECTS_DIR / name / "meta.yaml").read_text())
-        source = mujoco.MjSpec.from_file(str(OBJECTS_DIR / name / meta["mujoco"]["xml_path"]))
+        meta = yaml.safe_load((_OBJECT_DIR[name] / "meta.yaml").read_text())
+        source = mujoco.MjSpec.from_file(str(_OBJECT_DIR[name] / meta["mujoco"]["xml_path"]))
         top = next(b for b in source.worldbody.bodies)
         drop = spec.worldbody.add_frame(pos=[0.0, 0.0, outer[2] + self._ABOVE_RIM])
         dropped = drop.attach_body(top, "obj/", "")

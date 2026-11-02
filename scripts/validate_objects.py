@@ -527,13 +527,13 @@ def main():
 
     objects_dir = Path(__file__).parent.parent / "src" / "prl_assets" / "objects"
 
+    # Objects may sit in collection subdirectories (e.g. ycbv/); each has a meta.yaml.
+    obj_dirs = sorted((meta.parent for meta in objects_dir.rglob("meta.yaml")), key=lambda d: d.name)
     if args.object:
-        obj_dirs = [objects_dir / args.object]
-        if not obj_dirs[0].exists():
+        obj_dirs = [d for d in obj_dirs if d.name == args.object]
+        if not obj_dirs:
             print(f"Object not found: {args.object}")
             return 1
-    else:
-        obj_dirs = sorted([d for d in objects_dir.iterdir() if d.is_dir()])
 
     print("prl_assets Object Validation")
     print("=" * 40)

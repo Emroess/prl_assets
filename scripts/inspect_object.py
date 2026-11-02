@@ -135,11 +135,13 @@ def main():
     args = parser.parse_args()
 
     objects_dir = Path(__file__).parent.parent / "src" / "prl_assets" / "objects"
-    obj_dir = objects_dir / args.object
+    # Objects may sit in collection subdirectories (e.g. ycbv/); each has a meta.yaml.
+    obj_dirs = {meta.parent.name: meta.parent for meta in objects_dir.rglob("meta.yaml")}
+    obj_dir = obj_dirs.get(args.object)
 
-    if not obj_dir.exists():
+    if obj_dir is None:
         print(f"Object not found: {args.object}")
-        print(f"Available objects: {', '.join(d.name for d in objects_dir.iterdir() if d.is_dir())}")
+        print(f"Available objects: {', '.join(sorted(obj_dirs))}")
         return 1
 
     print(f"Inspecting: {args.object}")
