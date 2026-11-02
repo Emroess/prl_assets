@@ -14,6 +14,49 @@ whole catalog, collections included; `prl_assets.YCBV_OBJECTS_DIR` is the YCB-Vi
 collection alone. Canonical names are unique across the whole catalog, and a
 collection does not prefix them.
 
+## Collision geometry
+
+MuJoCo simulates an object's collision geoms, not the mesh it renders, so the two must
+agree. `prl_assets.authoring.check` measures each compiled model, and
+`tests/test_collision_fit.py` runs it on every object in CI. The visual mesh is the
+geoms in group 2; the collision geoms are those with `contype` or `conaffinity` set, in
+group 3. A mesh collision geom counts as its convex hull, as MuJoCo collides it. An
+object with no visual mesh renders its collision geoms, which are then its shape.
+
+| Check | Default limit |
+| --- | --- |
+| `visual_outside`: 99th percentile of the visual surface's distance outside the collision geoms (undersized) | 3 mm |
+| `collision_excess`: 99th percentile of the collision surface's distance outside the visual mesh's convex hull (oversized) | 3 mm |
+| `sink`: how far the visual mesh reaches below the collision geometry's bottom | 1 mm |
+| `resting`: the collision geometry's bottom at the model file's pose, which must rest on z = 0 | 1 mm |
+| `floor_gap`: for open objects, a 1 cm sphere dropped on the axis rests this far from the visual surface beneath it | 3 mm |
+
+The model must also have a free joint on its top-level body (unless `category` includes
+`fixture`), and its compiled mass must equal `mass`.
+
+### `geometric_properties.open`
+
+`open: true` declares an interior that things are put into: a cup, bowl, plate, tote,
+tray or bin. Such an object is checked for `floor_gap`, which a solid or filled interior
+fails by roughly its depth.
+
+### `geometric_properties.collision_tolerance_mm`
+
+An object may widen a limit where a primitive deliberately departs from the scan, for
+example a box with flat faces for a scanned box whose edges the scanner rounded. The
+reason is required:
+
+```yaml
+geometric_properties:
+  type: box
+  collision_tolerance_mm:
+    collision_excess: 10.0
+    reason: "the scan rounds the box's edges; the box keeps flat faces for resting and face grasps"
+```
+
+Keys are the check names above. A tolerance without a reason, or with an unknown key,
+is an error.
+
 ## YCB-Video identity: `dataset.ycbv`
 
 Every object in `objects/ycbv/` declares which YCB-Video object it is:
