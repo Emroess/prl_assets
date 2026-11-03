@@ -8,15 +8,17 @@
     "distance": "symmetric nearest-neighbour surface distance, both sample sets pooled",
     "tolerances": {
       "p99_mm": 3.0,
+      "colour_median": 12.0,
       "residual_rotation_deg": 0.5,
       "residual_translation_mm": 1.0
     }
   },
   "environment": {
-    "python": "3.12.12",
+    "python": "3.14.7",
     "numpy": "2.5.4",
     "scipy": "1.18.1",
-    "trimesh": "5.2.0"
+    "trimesh": "5.2.0",
+    "pillow": "13.0.0"
   },
   "objects": [
     {
@@ -57,6 +59,21 @@
         "mean": 1.01,
         "p99": 2.26,
         "max": 3.31
+      },
+      "colour_median": 2.7,
+      "flipped": {
+        "180_about_x": {
+          "p99_mm": 6.23,
+          "colour_median": 48.7
+        },
+        "180_about_y": {
+          "p99_mm": 9.56,
+          "colour_median": 56.3
+        },
+        "180_about_z": {
+          "p99_mm": 8.82,
+          "colour_median": 60.3
+        }
       },
       "best_fit_residual": {
         "rotation_deg": 0.015,
@@ -113,6 +130,21 @@
         "p99": 0.96,
         "max": 1.52
       },
+      "colour_median": 4.7,
+      "flipped": {
+        "180_about_x": {
+          "p99_mm": 2.08,
+          "colour_median": 58.7
+        },
+        "180_about_y": {
+          "p99_mm": 2.36,
+          "colour_median": 53.0
+        },
+        "180_about_z": {
+          "p99_mm": 1.46,
+          "colour_median": 34.7
+        }
+      },
       "best_fit_residual": {
         "rotation_deg": 0.008,
         "translation_mm": 0.045
@@ -123,8 +155,8 @@
         0.0301
       ],
       "bop_extent_in_asset_axes_m": [
-        0.1107,
-        0.1193,
+        0.0731,
+        0.0897,
         0.0301
       ],
       "pass": true
@@ -167,6 +199,21 @@
         "mean": 0.55,
         "p99": 1.23,
         "max": 1.88
+      },
+      "colour_median": 5.3,
+      "flipped": {
+        "180_about_x": {
+          "p99_mm": 5.11,
+          "colour_median": 38.3
+        },
+        "180_about_y": {
+          "p99_mm": 5.07,
+          "colour_median": 38.7
+        },
+        "180_about_z": {
+          "p99_mm": 1.61,
+          "colour_median": 26.7
+        }
       },
       "best_fit_residual": {
         "rotation_deg": 0.008,
@@ -222,6 +269,21 @@
         "mean": 0.68,
         "p99": 1.52,
         "max": 2.19
+      },
+      "colour_median": 1.7,
+      "flipped": {
+        "180_about_x": {
+          "p99_mm": 7.63,
+          "colour_median": 60.7
+        },
+        "180_about_y": {
+          "p99_mm": 4.68,
+          "colour_median": 61.7
+        },
+        "180_about_z": {
+          "p99_mm": 9.41,
+          "colour_median": 60.0
+        }
       },
       "best_fit_residual": {
         "rotation_deg": 0.029,

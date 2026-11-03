@@ -71,8 +71,9 @@ behave as before:
 Translations are zero: the asset and BOP origins coincide, at the BOP model origin near
 the geometric centre. New objects in the collection use the identity.
 
-`scripts/audit_ycbv.py` checks each declared transform against the BOP model and
-records the result in `docs/ycbv_audit.json`; see [the audit](ycbv_audit.md).
+`scripts/audit_ycbv.py` checks each declared transform against the BOP model, by shape
+and by texture, and records the result in `docs/ycbv_audit.json`; see
+[the audit](ycbv_audit.md).
 
 ## Symmetries: `symmetries`
 
