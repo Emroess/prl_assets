@@ -21,7 +21,8 @@ agree. `prl_assets.authoring.check` measures each compiled model, and
 `tests/test_collision_fit.py` runs it on every object in CI. The visual mesh is the
 geoms in group 2; the collision geoms are those with `contype` or `conaffinity` set, in
 group 3. A mesh collision geom counts as its convex hull, as MuJoCo collides it. An
-object with no visual mesh renders its collision geoms, which are then its shape.
+object with no visual mesh renders its collision geoms, which are then its shape, so only
+`resting` and the sizes below apply to it.
 
 | Check | Default limit |
 | --- | --- |
@@ -34,11 +35,16 @@ object with no visual mesh renders its collision geoms, which are then its shape
 The model must also have a free joint on its top-level body (unless `category` includes
 `fixture`), and its compiled mass must equal `mass`.
 
+Grasp and place planning read sizes from the metadata, not the geoms, so each size the
+metadata states must match the collision geometry's extent along the asset axes within
+2 mm: `dimensions`, `geometric_properties.size` and `outer_size` (full x, y, z extents),
+and `radius` or `outer_radius` (as a diameter in x and y, with `height` in z).
+
 ### `geometric_properties.open`
 
-`open: true` declares an interior that things are put into: a cup, bowl, plate, tote,
-tray or bin. Such an object is checked for `floor_gap`, which a solid or filled interior
-fails by roughly its depth.
+`open: true` (a boolean) declares an interior that things are put into: a cup, bowl,
+plate, tote, tray or bin. Such an object with a visual mesh is checked for `floor_gap`,
+which a solid or filled interior fails by roughly its depth.
 
 ### `geometric_properties.collision_tolerance_mm`
 
@@ -54,8 +60,9 @@ geometric_properties:
     reason: "the scan rounds the box's edges; the box keeps flat faces for resting and face grasps"
 ```
 
-Keys are the check names above. A tolerance without a reason, or with an unknown key,
-is an error.
+Keys are the check names above and values are millimetres. A tolerance without a
+reason, with an unknown key, or with a value that is not a non-negative number is an
+error.
 
 ## YCB-Video identity: `dataset.ycbv`
 

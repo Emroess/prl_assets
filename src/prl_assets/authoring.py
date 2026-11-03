@@ -26,7 +26,9 @@ every object.
 from __future__ import annotations
 
 import math
+import os
 import re
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -50,6 +52,9 @@ DEFAULT_TOLERANCE_MM = {
     "resting": 1.0,  # |collision bottom| at the model file's pose, which must rest on z = 0
     "floor_gap": 3.0,  # open objects: a dropped sphere's rest height above the visual inner floor
 }
+# How far a size in geometric_properties or dimensions may differ from the collision
+# geometry's extent: grasp and place planning read these fields, not the geoms.
+SIZE_TOLERANCE_MM = 2.0
 
 _SAMPLES = 20000
 _PROBE_RADIUS = 0.01
@@ -59,8 +64,15 @@ _PROBE_RADIUS = 0.01
 
 
 def object_dirs(root: Path = OBJECTS_DIR) -> dict[str, Path]:
-    """Every object directory under ``root``, at any depth, keyed by directory name."""
-    return {meta.parent.name: meta.parent for meta in sorted(Path(root).rglob("meta.yaml"))}
+    """Every object directory under ``root``, at any depth, keyed by directory name.
+    Names are unique across collections; a duplicate is an error."""
+    dirs: dict[str, Path] = {}
+    for meta in sorted(Path(root).rglob("meta.yaml")):
+        name = meta.parent.name
+        if name in dirs:
+            raise ValueError(f"object name {name!r} is used by both {dirs[name]} and {meta.parent}")
+        dirs[name] = meta.parent
+    return dirs
 
 
 @dataclass
@@ -201,44 +213,53 @@ def _outside_hull(vertices: np.ndarray, points: np.ndarray) -> np.ndarray:
 class Fit:
     """How an object's collision geometry agrees with its visual mesh, in millimetres."""
 
-    visual_outside_p99: float
-    visual_outside_max: float
-    collision_excess_p99: float
-    collision_excess_max: float
-    sink: float
     resting: float
-    floor_gap: float | None
-    visual_extent: list[float]
     collision_extent: list[float]
+    # None for an object without a visual mesh: its collision geoms are what it shows.
+    visual_outside_p99: float | None = None
+    visual_outside_max: float | None = None
+    collision_excess_p99: float | None = None
+    collision_excess_max: float | None = None
+    sink: float | None = None
+    floor_gap: float | None = None
+    visual_extent: list[float] | None = None
 
 
 def collision_fit(obj: Compiled, n: int = _SAMPLES) -> Fit:
-    """Measure ``obj``'s collision geoms against its visual mesh. See ``DEFAULT_TOLERANCE_MM``."""
-    visual = visual_points(obj, n)
+    """Measure ``obj``'s collision geoms against its visual mesh. See ``DEFAULT_TOLERANCE_MM``.
+    Without a visual mesh only the resting height and extent are measured."""
     collision = [geom_mesh(obj, g) for g in collision_geoms(obj)]
+    col_vertices = np.vstack([c.vertices for c in collision])
+    bottom = col_vertices[:, 2].min()
+    resting = _mm(1e3 * bottom)
+    collision_extent = [_mm(1e3 * v) for v in np.ptp(col_vertices, axis=0)]
+    if not visual_geoms(obj):
+        return Fit(resting=resting, collision_extent=collision_extent)
+    visual = visual_points(obj, n)
     col_points = trimesh.sample.sample_surface(trimesh.util.concatenate(collision), n, seed=1)[0]
     vis_vertices = np.vstack([geom_mesh(obj, g).vertices for g in visual_geoms(obj)])
-    col_vertices = np.vstack([c.vertices for c in collision])
 
     outside = 1e3 * distance_outside(obj, visual)
     excess = 1e3 * _outside_hull(vis_vertices, col_points)
-    bottom = col_vertices[:, 2].min()
     return Fit(
+        resting=resting,
+        collision_extent=collision_extent,
         visual_outside_p99=_mm(np.percentile(outside, 99)),
         visual_outside_max=_mm(outside.max()),
         collision_excess_p99=_mm(np.percentile(excess, 99)),
         collision_excess_max=_mm(excess.max()),
         sink=_mm(1e3 * (bottom - vis_vertices[:, 2].min())),
-        resting=_mm(1e3 * bottom),
         floor_gap=floor_gap(obj) if is_open(obj) else None,
         visual_extent=[_mm(1e3 * v) for v in np.ptp(vis_vertices, axis=0)],
-        collision_extent=[_mm(1e3 * v) for v in np.ptp(col_vertices, axis=0)],
     )
 
 
 def is_open(obj: Compiled) -> bool:
     """Whether the object declares an open interior that things can be put into."""
-    return bool(obj.meta.get("geometric_properties", {}).get("open"))
+    value = (obj.meta.get("geometric_properties") or {}).get("open", False)
+    if not isinstance(value, bool):
+        raise ValueError(f"{obj.name}: geometric_properties.open must be true or false, not {value!r}")
+    return value
 
 
 def visual_floor(obj: Compiled, xy: tuple[float, float] | None = None) -> float:
@@ -298,13 +319,21 @@ class Report:
 
     def __str__(self) -> str:
         f = self.fit
-        lines = [
-            f"{self.name}: {'OK' if self.ok else 'FAIL'}",
-            f"  visual outside collision  p99 {f.visual_outside_p99:6.1f} mm  max {f.visual_outside_max:6.1f} mm",
-            f"  collision beyond visual   p99 {f.collision_excess_p99:6.1f} mm  max {f.collision_excess_max:6.1f} mm",
-            f"  visual below collision        {f.sink:6.1f} mm   collision bottom at {f.resting:6.1f} mm",
-            f"  extent visual {f.visual_extent} mm  collision {f.collision_extent} mm",
-        ]
+        lines = [f"{self.name}: {'OK' if self.ok else 'FAIL'}"]
+        if f.visual_extent is None:
+            lines += [
+                "  no visual mesh: the collision geoms are what it shows",
+                f"  collision bottom at {f.resting:6.1f} mm  extent {f.collision_extent} mm",
+            ]
+        else:
+            outside = (f.visual_outside_p99, f.visual_outside_max)
+            excess = (f.collision_excess_p99, f.collision_excess_max)
+            lines += [
+                f"  visual outside collision  p99 {outside[0]:6.1f} mm  max {outside[1]:6.1f} mm",
+                f"  collision beyond visual   p99 {excess[0]:6.1f} mm  max {excess[1]:6.1f} mm",
+                f"  visual below collision        {f.sink:6.1f} mm   collision bottom at {f.resting:6.1f} mm",
+                f"  extent visual {f.visual_extent} mm  collision {f.collision_extent} mm",
+            ]
         if f.floor_gap is not None:
             lines.append(f"  dropped sphere rests       {f.floor_gap:6.1f} mm above the visual floor")
         lines += [f"  - {msg}" for msg in self.failures]
@@ -313,13 +342,44 @@ class Report:
 
 def tolerances(obj: Compiled) -> dict[str, float]:
     """Defaults, widened by the object's ``geometric_properties.collision_tolerance_mm``."""
-    declared = dict(obj.meta.get("geometric_properties", {}).get("collision_tolerance_mm") or {})
-    if declared and not declared.pop("reason", None):
+    declared = (obj.meta.get("geometric_properties") or {}).get("collision_tolerance_mm") or {}
+    if not isinstance(declared, dict):
+        raise ValueError(f"{obj.name}: collision_tolerance_mm must be a mapping, not {declared!r}")
+    declared = dict(declared)
+    reason = declared.pop("reason", None)
+    if declared and not (isinstance(reason, str) and reason.strip()):
         raise ValueError(f"{obj.name}: collision_tolerance_mm must state a reason")
     unknown = set(declared) - set(DEFAULT_TOLERANCE_MM)
     if unknown:
         raise ValueError(f"{obj.name}: unknown collision tolerances {sorted(unknown)}")
-    return {**DEFAULT_TOLERANCE_MM, **declared}
+    for key, value in declared.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not value >= 0:
+            raise ValueError(f"{obj.name}: collision tolerance {key} must be a number of mm, not {value!r}")
+    return {**DEFAULT_TOLERANCE_MM, **{k: float(v) for k, v in declared.items()}}
+
+
+def declared_extents(meta: dict) -> dict[str, list[float]]:
+    """The full extents (x, y, z; metres) that an object's metadata states, by field."""
+    gp = meta.get("geometric_properties") or {}
+    out = {}
+    if "dimensions" in meta:
+        out["dimensions"] = list(meta["dimensions"])
+    for key in ("size", "outer_size"):
+        if key in gp:
+            out[f"geometric_properties.{key}"] = list(gp[key])
+    for key in ("radius", "outer_radius"):
+        if key in gp:
+            d = 2 * gp[key]
+            out[f"geometric_properties.{key} (diameter)"] = [d, d, gp["height"]] if "height" in gp else [d, d]
+    return out
+
+
+def _categories(obj: Compiled) -> list[str]:
+    category = obj.meta.get("category") or []
+    category = [category] if isinstance(category, str) else category
+    if not isinstance(category, list) or not all(isinstance(c, str) for c in category):
+        raise ValueError(f"{obj.name}: category must be a string or a list of strings, not {category!r}")
+    return category
 
 
 def check(obj: Compiled | str | Path) -> Report:
@@ -329,7 +389,8 @@ def check(obj: Compiled | str | Path) -> Report:
     m = obj.model
     failures = []
 
-    fixture = "fixture" in (obj.meta.get("category") or [])
+    fixture = "fixture" in _categories(obj)
+    tol = tolerances(obj)
     free = [j for j in range(m.njnt) if m.jnt_bodyid[j] == obj.body and m.jnt_type[j] == mujoco.mjtJoint.mjJNT_FREE]
     if not fixture and not free:
         failures.append("no free joint on the top-level body (required unless category includes 'fixture')")
@@ -342,24 +403,30 @@ def check(obj: Compiled | str | Path) -> Report:
     if visual and any(m.geom_group[g] != COLLISION_GROUP for g in collision):
         failures.append(f"collision geoms must be in group {COLLISION_GROUP} when a visual mesh is present")
     # A visual geom left at MuJoCo's default density adds mass, so this also catches it.
-    if "mass" in obj.meta and not math.isclose(m.body_mass[1:].sum(), obj.meta["mass"], abs_tol=1e-6):
+    # Mass is split across geoms and written to 6 significant digits.
+    if "mass" in obj.meta and not math.isclose(m.body_mass[1:].sum(), obj.meta["mass"], rel_tol=1e-5):
         failures.append(f"compiled mass {m.body_mass[1:].sum():.4f} kg != declared {obj.meta['mass']} kg")
-    if not collision or not visual:
-        return Report(obj.name, Fit(*([math.nan] * 6), None, [], []), failures)
+    if not collision:
+        return Report(obj.name, Fit(resting=math.nan, collision_extent=[]), failures)
 
     fit = collision_fit(obj)
-    tol = tolerances(obj)
-    limits = [
-        ("visual_outside", fit.visual_outside_p99, "visual mesh lies outside the collision geoms (undersized)"),
-        ("collision_excess", fit.collision_excess_p99, "collision geoms extend beyond the visual mesh"),
-        ("sink", fit.sink, "visual mesh reaches below the collision geometry and sinks into a support"),
-        ("resting", abs(fit.resting), "the model file's pose does not rest the object on z = 0"),
-    ]
+    limits = [("resting", abs(fit.resting), "the model file's pose does not rest the object on z = 0")]
+    if visual:
+        limits += [
+            ("visual_outside", fit.visual_outside_p99, "visual mesh lies outside the collision geoms (undersized)"),
+            ("collision_excess", fit.collision_excess_p99, "collision geoms extend beyond the visual mesh"),
+            ("sink", fit.sink, "visual mesh reaches below the collision geometry and sinks into a support"),
+        ]
     if fit.floor_gap is not None:
         limits.append(("floor_gap", abs(fit.floor_gap), "a dropped object does not reach the visual inner floor"))
     for key, value, why in limits:
         if value > tol[key]:
             failures.append(f"{why}: {value:.1f} mm > {tol[key]:.1f} mm ({key})")
+    for field_name, extent in declared_extents(obj.meta).items():
+        actual = fit.collision_extent[: len(extent)]
+        if any(abs(1e3 * e - a) > SIZE_TOLERANCE_MM for e, a in zip(extent, actual)):
+            stated = [_mm(1e3 * e) for e in extent]
+            failures.append(f"{field_name} {stated} mm differs from the collision extent {actual} mm")
     return Report(obj.name, fit, failures)
 
 
@@ -625,7 +692,7 @@ def write_model(
         "</mujoco>\n"
     )
     path = Path(obj_dir) / f"{name}.xml"
-    path.write_text(xml)
+    _write_atomic(path, xml)
     return path
 
 
@@ -642,6 +709,9 @@ def replace_collision_geoms(
     leaving its assets and visual geom untouched. The new geoms go where the first old one
     was; ``comment`` replaces the XML comment directly above it, or is added there."""
     text = Path(xml_path).read_text()
+    # Collision is decided from each geom's own attributes; a class could set them.
+    if re.search(r"<default\b|\bclass=", text):
+        raise ValueError(f"{xml_path}: models with <default> classes are not supported; edit the geoms by hand")
     blocks = [b for b in re.finditer(r"[ \t]*<geom\b[^>]*?/>\n?", text, re.S) if _is_collision_xml(b.group(0))]
     if not blocks:
         raise ValueError(f"{xml_path}: no collision geoms found")
@@ -667,7 +737,7 @@ def replace_collision_geoms(
         )
         if not n:
             raise ValueError(f'{xml_path}: no <body name="{name}" pos="..."> to move')
-    Path(xml_path).write_text(text)
+    _write_atomic(Path(xml_path), text)
 
 
 def _is_collision_xml(geom: str) -> bool:
@@ -681,8 +751,20 @@ def write_meta(obj_dir: Path, name: str, **fields) -> Path:
     meta = {"name": name, **fields}
     meta.setdefault("mujoco", {})["xml_path"] = f"{name}.xml"
     path = Path(obj_dir) / "meta.yaml"
-    path.write_text(yaml.safe_dump(meta, sort_keys=False))
+    _write_atomic(path, yaml.safe_dump(meta, sort_keys=False))
     return path
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    """Replace ``path`` with ``text``, leaving the old file and no temporary on failure."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".part")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 # -------------------------------------------------------------------------- utils
