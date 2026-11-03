@@ -1,0 +1,30 @@
+<mujoco model="uncle_goose_eagle">
+  <compiler angle="radian"/>
+
+  <asset>
+    <texture name="uncle_goose_eagle_tex" type="2d" file="uncle_goose_eagle_texture.png"/>
+    <material name="uncle_goose_eagle_mat" texture="uncle_goose_eagle_tex" specular="0.1" shininess="0.05"/>
+    <mesh name="uncle_goose_eagle_visual" file="uncle_goose_eagle_visual.obj"/>
+  </asset>
+
+  <worldbody>
+    <body name="uncle_goose_eagle" pos="0 0 0.022225">
+      <freejoint name="uncle_goose_eagle_joint"/>
+
+      <geom condim="4" name="uncle_goose_eagle_collision" group="3"
+            type="box"
+            size="0.022225 0.022225 0.022225"
+            mass="0.035"
+            friction="0.4 0.005 0.0001"
+            contype="1"
+            conaffinity="1"/>
+
+      <geom name="uncle_goose_eagle_visual" group="2" mass="0"
+            type="mesh"
+            mesh="uncle_goose_eagle_visual"
+            material="uncle_goose_eagle_mat"
+            contype="0"
+            conaffinity="0"/>
+    </body>
+  </worldbody>
+</mujoco>

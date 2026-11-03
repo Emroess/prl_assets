@@ -73,6 +73,7 @@ containers = assets.by_category("container")
 | `spam_can` | SPAM canned meat | box |
 | `recycle_bin` | Open-top recycling bin (hollow) | 5 boxes |
 | `sugar_box` | Domino sugar box | box |
+| `UncleGoose_Block_Set` | Wood Blocks | 28 unique boxes |
 | `wicker_tray` | Serving tray (hollow) | 5 boxes |
 | `yellow_tote` | Storage tote (hollow) | 5 boxes |
 

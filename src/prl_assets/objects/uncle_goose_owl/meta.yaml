@@ -1,0 +1,36 @@
+name: uncle_goose_owl
+description: Uncle Goose Classic ABC 1.75 in basswood block with the owl on its front.
+category: [toy, graspable, box, uncle_goose]
+
+mass: 0.035
+dimensions: [0.04445, 0.04445, 0.04445]
+material: basswood
+product_link: https://unclegoose.com/products/uncle-goose-classic-abc-blocks
+
+geometric_properties:
+  type: box
+  size: [0.04445, 0.04445, 0.04445]
+
+mujoco:
+  xml_path: uncle_goose_owl.xml
+  scale: 1.0
+  friction: [0.4, 0.005, 0.0001]
+
+faces:
+  front: {axis: "+y", kind: animal, print: owl, word: OWL, color: navy}
+  back: {axis: "-y", kind: number, print: "7", word: SEVEN, color: navy}
+  left: {axis: "-x", kind: letter, print: D, color: red}
+  right: {axis: "+x", kind: letter, print: U, color: red}
+  top: {axis: "+z", kind: letter, print: F, color: orange}
+  bottom: {axis: "-z", kind: letter, print: H, color: green}
+
+perception:
+  aliases: ["owl block", "uncle goose owl", "abc block owl"]
+
+policy:
+  grasping:
+    affordances: [lift, place, stack]
+    preferred_grasp_type: side_grasp
+    difficulty: easy
+  manipulation:
+    stable_poses: [upright, on_side, on_back]

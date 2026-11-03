@@ -1,0 +1,36 @@
+name: uncle_goose_fox
+description: Uncle Goose Classic ABC 1.75 in basswood block with the fox on its front.
+category: [toy, graspable, box, uncle_goose]
+
+mass: 0.035
+dimensions: [0.04445, 0.04445, 0.04445]
+material: basswood
+product_link: https://unclegoose.com/products/uncle-goose-classic-abc-blocks
+
+geometric_properties:
+  type: box
+  size: [0.04445, 0.04445, 0.04445]
+
+mujoco:
+  xml_path: uncle_goose_fox.xml
+  scale: 1.0
+  friction: [0.4, 0.005, 0.0001]
+
+faces:
+  front: {axis: "+y", kind: animal, print: fox, word: FOX, color: navy}
+  back: {axis: "-y", kind: number, print: "6", word: SIX, color: navy}
+  left: {axis: "-x", kind: letter, print: C, color: red}
+  right: {axis: "+x", kind: letter, print: Y, color: red}
+  top: {axis: "+z", kind: letter, print: I, color: yellow}
+  bottom: {axis: "-z", kind: letter, print: J, color: blue}
+
+perception:
+  aliases: ["fox block", "uncle goose fox", "abc block fox"]
+
+policy:
+  grasping:
+    affordances: [lift, place, stack]
+    preferred_grasp_type: side_grasp
+    difficulty: easy
+  manipulation:
+    stable_poses: [upright, on_side, on_back]
