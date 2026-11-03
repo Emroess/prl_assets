@@ -248,7 +248,7 @@ uv run python scripts/validate_objects.py
 | `viz_stacking_demo.py` | Physics demo: stacked dishes on tray, objects in tote |
 | `validate_objects.py` | Check objects against coordinate frame and collision standards |
 | `recenter_mesh.py` | Utility to re-center mesh origin to centroid |
-| `audit_ycbv.py` | Check YCB-V objects' declared frames against the pinned BOP models; writes `docs/ycbv_audit.json` |
+| `audit_ycbv.py` | Check YCB-V objects' declared frames against the pinned BOP models by shape and texture; writes `artifacts/ycbv_audit.json`, and with `--record` `docs/ycbv_audit.json` |
 
 ## License
 

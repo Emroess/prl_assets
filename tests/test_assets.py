@@ -146,6 +146,13 @@ def _object_dirs() -> list[Path]:
 _OBJECT_DIR = {d.name: d for d in _object_dirs()}
 
 
+def test_object_names_are_unique_across_collections():
+    """Canonical names are unique across the whole catalog (docs/schema.md); a duplicate in
+    another collection would also hide one of the two from the tests keyed by name."""
+    names = sorted(d.name for d in _object_dirs())
+    assert len(names) == len(set(names)), [n for n in set(names) if names.count(n) > 1]
+
+
 @pytest.mark.parametrize("obj_dir", _object_dirs(), ids=lambda d: d.name)
 def test_compiled_mass_matches_meta(obj_dir: Path) -> None:
     """An object's compiled MuJoCo mass is the real mass declared in its meta.yaml.

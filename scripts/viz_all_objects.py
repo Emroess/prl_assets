@@ -46,11 +46,10 @@ def create_scene_xml():
 
     for i, obj_name in enumerate(OBJECTS):
         # Objects may sit in collection subdirectories (e.g. ycbv/).
-        obj_dir = next(OBJECTS_DIR.rglob(f"{obj_name}/meta.yaml")).parent
-        xml_path = obj_dir / f"{obj_name}.xml"
-
-        if not xml_path.exists():
+        meta = next(OBJECTS_DIR.rglob(f"{obj_name}/meta.yaml"), None)
+        if meta is None or not (meta.parent / f"{obj_name}.xml").exists():
             continue
+        xml_path = meta.parent / f"{obj_name}.xml"
 
         # Calculate grid position
         col = i % GRID_COLS

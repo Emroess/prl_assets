@@ -64,13 +64,27 @@ jobs:
         run: uv sync --all-extras --dev
 
       # The pinned BOP archive (525 MB); the audit verifies its SHA-256 before use.
-      - name: Cache the BOP YCB-V models
-        uses: actions/cache@v4
+      # Restored and saved separately, so a failing audit does not download it again.
+      - name: Restore the BOP YCB-V models
+        id: bop-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/prl_assets
+          key: bop-ycbv-models-1e517a9b513cadb8eaf406ac3ce3c5f1d6fc4a80161c866b4e2a73d13de5e554
+
+      - name: Fetch and verify the BOP YCB-V models
+        timeout-minutes: 15
+        run: uv run python scripts/audit_ycbv.py --fetch-only
+
+      - name: Save the BOP YCB-V models
+        if: steps.bop-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
         with:
           path: ~/.cache/prl_assets
           key: bop-ycbv-models-1e517a9b513cadb8eaf406ac3ce3c5f1d6fc4a80161c866b4e2a73d13de5e554
 
       - name: YCB-V frames agree with the BOP models
+        timeout-minutes: 15
         run: uv run python scripts/audit_ycbv.py --out artifacts/ycbv_audit.json
 
       - name: Keep the audit
