@@ -10,7 +10,7 @@ geometric_properties:
   type: tote
   open: true  # things can be put inside; see docs/schema.md
   outer_size: [0.592, 0.399, 0.27]  # across the rim lip
-  wall_thickness: [0.026, 0.005]  # x walls (handle ends), y walls
+  wall_thickness: 0.026  # the thickest wall, at the handle ends; the side walls are 5 mm
   floor_thickness: 0.0035
   collision_tolerance_mm:
     collision_excess: 10.5

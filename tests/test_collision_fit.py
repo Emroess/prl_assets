@@ -11,7 +11,7 @@ compiled model against its visual mesh; the tolerances and how an object may wid
 in ``docs/schema.md``.
 
 Writes artifacts/collision_fit.json (override the directory with PRL_ASSETS_ARTIFACTS):
-every object's measurements and the failures found.
+every object's measurements and the failures found, when every object was checked.
 """
 
 import json
@@ -19,6 +19,7 @@ import os
 from dataclasses import asdict
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 authoring = pytest.importorskip("prl_assets.authoring")
@@ -31,10 +32,12 @@ _REPORTS = {}
 @pytest.fixture(scope="module", autouse=True)
 def _write_artifact():
     yield
+    if set(_REPORTS) != set(NAMES):  # a partial run (-k) must not replace a full artifact
+        return
     out = Path(os.environ.get("PRL_ASSETS_ARTIFACTS", "artifacts"))
     out.mkdir(parents=True, exist_ok=True)
     rows = {name: {"ok": r.ok, "failures": r.failures, **asdict(r.fit)} for name, r in sorted(_REPORTS.items())}
-    (out / "collision_fit.json").write_text(json.dumps(rows, indent=2) + "\n")
+    (out / "collision_fit.json").write_text(json.dumps(rows, indent=2, allow_nan=False) + "\n")
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -91,7 +94,8 @@ def test_a_filled_container_fails():
     obj = authoring.load("plastic_bowl")
     spec = obj.spec.copy()
     body = next(iter(spec.worldbody.bodies))
-    rim = authoring.collision_fit(obj).visual_extent[2] / 1e3
+    (g,) = authoring.visual_geoms(obj)
+    rim = np.ptp(authoring.geom_mesh(obj, g).vertices[:, 2])
     body.add_geom(
         type=mujoco.mjtGeom.mjGEOM_CYLINDER,
         size=[0.03, rim / 2, 0],
@@ -103,6 +107,15 @@ def test_a_filled_container_fails():
     )
     report = authoring.check(authoring.from_spec(spec, obj))
     assert any("(floor_gap)" in f for f in report.failures), str(report)
+
+
+def test_a_stale_size_in_the_metadata_fails():
+    """Grasp and place planning read geometric_properties, not the geoms."""
+    obj = authoring.load("notebook")
+    gp = obj.meta["geometric_properties"]
+    meta = {**obj.meta, "geometric_properties": {**gp, "size": [gp["size"][0] + 0.005, *gp["size"][1:]]}}
+    report = authoring.check(authoring.from_spec(obj.spec.copy(), obj, meta))
+    assert any("geometric_properties.size" in f for f in report.failures), str(report)
 
 
 def test_a_tolerance_must_state_its_reason():
